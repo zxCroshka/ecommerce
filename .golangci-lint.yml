@@ -1,0 +1,29 @@
+linters:
+  enable:
+    - errcheck        # все ошибки должны обрабатываться
+    - gosimple        # упрощение кода
+    - govet           # подозрительные конструкции
+    - ineffassign     # бесполезные присвоения
+    - staticcheck     # глубокий статический анализ
+    - unused          # неиспользуемый код
+    - gosec           # проверки безопасности
+    - goimports       # правильный порядок импортов
+    - misspell        # опечатки в комментариях
+    - gocritic        # советы по улучшению кода
+
+linters-settings:
+  gosec:
+    excludes:
+      - G404          # не ругаться на math/rand (не crypto)
+  goimports:
+    local-prefixes: github.com/zxCroshka/ecommerce
+
+issues:
+  exclude-rules:
+    - path: "_test.go"
+      linters:
+        - gosec       # в тестах можно чуть свободнее
+        - errcheck
+
+run:
+  timeout: 5m

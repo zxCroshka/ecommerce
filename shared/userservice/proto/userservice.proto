@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+
+package userservice;
+
+
+option go_package = "github.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicrev1";
+//
+service User {
+	//
+	rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+	//
+	rpc GetUser(GetUserRequest) returns (GetUserResponse);
+}
+
+
+
+message ValidateTokenRequest{
+	string token = 1;
+}
+
+
+message ValidateTokenResponse {
+	int64 user_id = 1;
+	bool is_admin = 2;
+}
+
+message GetUserRequest {
+  int64 user_id = 1;
+}
+
+message GetUserResponse{
+	string email = 1;
+	bool is_admin = 2;
+	string name = 3;
+}

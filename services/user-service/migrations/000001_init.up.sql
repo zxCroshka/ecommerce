@@ -1,0 +1,11 @@
+CREATE SCHEMA IF NOT EXISTS userservice;
+
+CREATE TABLE IF NOT EXISTS userservice.users (
+	id SERIAL PRIMARY KEY,
+	email TEXT NOT NULL UNIQUE,
+	password_hash BYTEA NOT NULL,
+	name TEXT,
+	is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+	created_at TIMESTAMP DEFAULT NOW()
+
+);
