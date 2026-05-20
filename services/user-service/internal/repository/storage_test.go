@@ -1,4 +1,3 @@
-// internal/repository/storage_test.go
 package repository_test
 
 import (
@@ -16,7 +15,7 @@ import (
 func TestStorage_RegisterUserTX(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_ = tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage, err := repository.NewForTests(ctx, tdb.Pool)
 	require.NoError(t, err)
@@ -33,7 +32,8 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		assert.Greater(t, userID, 0)
+		// ✅ Исправлено: проверяем что ID > 0, а не конкретное значение
+		assert.Greater(t, userID, int64(0))
 
 		// Verify user was created
 		user, err := storage.User(ctx, email)
@@ -64,8 +64,8 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		// Verify data wasn't changed (transaction rolled back)
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
-		assert.Equal(t, "User1", user.Name)      // Name should remain original
-		assert.Equal(t, passHash, user.PassHash) // Hash should remain original
+		assert.Equal(t, "User1", user.Name)
+		assert.Equal(t, passHash, user.PassHash)
 	})
 
 	t.Run("register admin user", func(t *testing.T) {
@@ -77,7 +77,8 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		assert.Greater(t, userID, 0)
+		// ✅ Исправлено: проверяем что ID > 0
+		assert.Greater(t, userID, int64(0))
 
 		// Verify admin flag
 		isAdmin, err := storage.IsAdmin(ctx, userID)
@@ -90,7 +91,7 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		email := "concurrent@example.com"
 
 		// Act - try to register concurrently
-		done := make(chan error)
+		done := make(chan error, 2)
 		go func() {
 			_, err := storage.RegisterUserTX(ctx, email, []byte("hash1"), "User1", false)
 			done <- err
@@ -104,7 +105,6 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		err1 := <-done
 		err2 := <-done
 
-		// One success, one failure
 		if err1 == nil {
 			assert.Error(t, err2)
 			assert.ErrorIs(t, err2, customerrors.ErrUserExists)
@@ -122,7 +122,7 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 func TestStorage_CRUDOperations(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_ = tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage, err := repository.NewForTests(ctx, tdb.Pool)
 	require.NoError(t, err)
@@ -134,6 +134,8 @@ func TestStorage_CRUDOperations(t *testing.T) {
 
 	userID, err := storage.RegisterUserTX(ctx, email, passHash, name, false)
 	require.NoError(t, err)
+	// ✅ Исправлено: просто проверяем что ID > 0
+	assert.Greater(t, userID, int64(0))
 
 	t.Run("get user by email", func(t *testing.T) {
 		// Act

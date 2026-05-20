@@ -100,3 +100,4 @@ func (c *Client) IsBlacklisted(ctx context.Context, tokenID string) (bool, error
 
 	return exists == 1, nil
 }
+

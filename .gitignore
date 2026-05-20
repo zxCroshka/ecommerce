@@ -1,0 +1,16 @@
+# Binary files
+*.exe
+*.dll
+*.so
+user-service
+bin/
+
+# Specific paths
+services/user-service/bin/
+services/user-service/user-service
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+

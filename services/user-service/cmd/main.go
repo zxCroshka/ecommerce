@@ -10,8 +10,8 @@ import (
 
 	"github.com/zxCroshka/ecommerce/services/user-service/app"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/config"
+	kaf "github.com/zxCroshka/ecommerce/services/user-service/internal/kafka"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository"
-	kaf "github.com/zxCroshka/ecommerce/services/user-service/kafka"
 )
 
 const (
@@ -55,9 +55,9 @@ func main() {
 		})
 
 	postgresURL := repository.GetPostgresURL(postgresCfg)
-	fmt.Println("POSTGRES URL:",postgresURL)
+	fmt.Println("POSTGRES URL:", postgresURL)
 
-		log.Info(
+	log.Info(
 		"starting application",
 		slog.String("env", cfg.Service.Environment),
 		slog.Any("cfg", cfg),
