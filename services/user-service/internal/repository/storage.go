@@ -64,10 +64,9 @@ func NewForTests(ctx context.Context, pool *pgxpool.Pool) (*Storage, error) {
 func New(ctx context.Context, storageURL string) (*Storage, error) {
 	cfg, err := pgxpool.ParseConfig(storageURL)
 	if err != nil {
-		if err != nil {
-			slog.Error(fmt.Sprintf("error parsing connection config: %v", err))
-			return nil, err
-		}
+		slog.Error(fmt.Sprintf("error parsing connection config: %v", err))
+		return nil, err
+
 	}
 	slog.Info("Database config",
 		"host", cfg.ConnConfig.Host,

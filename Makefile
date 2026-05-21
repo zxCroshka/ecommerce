@@ -1,7 +1,7 @@
-.PHONY: lint lint-fix migrate-create test test-unit test-integration test-coverage build run lint-errcheck migrate-up
+.PHONY: lint lint-fix migrate-create test test-unit test-integration test-coverage build run lint-errcheck migrate-up test-grpc test-http
 
 lint:
-	golangci-lint run ./...
+	golangci-lint run ./... --build-tags=integration
 
 lint-fix:
 	golangci-lint run --fix ./...
@@ -57,3 +57,8 @@ migrate-up:
 
 make migrate-down:
 	migrate -path ./services/user-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable" down
+test-grpc:
+	go test ./services/user-service/internal/grpc/... -v
+
+test-http:
+	go test ./services/user-service/internal/handlers/... -v

@@ -10,17 +10,18 @@ import (
 
 type ErrorMiddleware struct{}
 
-
-func NewErrorMiddleware() *ErrorMiddleware{
+func NewErrorMiddleware() *ErrorMiddleware {
 	return &ErrorMiddleware{}
 }
-
 
 func (m *ErrorMiddleware) ErrorHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
 
 		if len(c.Errors) == 0 {
+			return
+		}
+		if c.Writer.Written() {
 			return
 		}
 

@@ -7,11 +7,11 @@ import (
 
 	"github.com/zxCroshka/ecommerce/services/user-service/app/grpcapp"
 	"github.com/zxCroshka/ecommerce/services/user-service/app/handlersapp"
+	kaf "github.com/zxCroshka/ecommerce/services/user-service/internal/kafka"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/lib/jwt"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/redis"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/service"
-	kaf "github.com/zxCroshka/ecommerce/services/user-service/kafka"
 )
 
 type App struct {

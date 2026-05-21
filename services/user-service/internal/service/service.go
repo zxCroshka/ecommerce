@@ -13,6 +13,18 @@ import (
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/service/pwdgen"
 )
 
+type UserServiceInterface interface {
+	Register(ctx context.Context, email, password, name string, isAdmin bool) error
+	Login(ctx context.Context, email, password string) (*jwt.TokenPair, error)
+	RefreshTokens(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
+	Logout(ctx context.Context, accessToken, refreshToken string) error
+	UpdateEmail(ctx context.Context, token, newEmail string) error
+	UpdateName(ctx context.Context, token, newName string) error
+	UpdatePassword(ctx context.Context, token, oldPassword, newPassword string) error
+	GetUser(ctx context.Context, userID int64) (domain.User, error)
+	ValidateToken(ctx context.Context, token string) (int64, bool, error)
+}
+
 type UserService struct {
 	log        *slog.Logger
 	usrManager UserManager
@@ -94,12 +106,12 @@ func (s *UserService) Login(ctx context.Context, email string, password string) 
 	user, err := s.usrManager.User(ctx, email)
 	if err != nil {
 		log.Error("invalid credentials")
-		return nil, fmt.Errorf("%s: %w",op, customerrors.ErrInvalidCredentials)
+		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidCredentials)
 	}
 
 	if !pwdgen.Check([]byte(password), user.PassHash) {
 		log.Error("invalid credentials")
-		return nil, fmt.Errorf("%s: %w",op, customerrors.ErrInvalidCredentials)
+		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidCredentials)
 	}
 
 	tokenPair, refreshTokenID, err := s.jwtManager.GenerateTokenPair(user.Id, user.Email, user.IsAdmin)
@@ -281,7 +293,7 @@ func (s *UserService) UpdatePassword(ctx context.Context, token string, oldPassw
 
 	if !pwdgen.Check([]byte(oldPassword), user.PassHash) {
 		log.Error("invalid credentials")
-		return fmt.Errorf("%s: %w",op, customerrors.ErrInvalidCredentials)
+		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidCredentials)
 	}
 
 	newPasshash := pwdgen.Generate([]byte(newPassword))
