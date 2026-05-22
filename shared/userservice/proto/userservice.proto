@@ -4,7 +4,7 @@ syntax = "proto3";
 package userservice;
 
 
-option go_package = "github.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicrev1";
+option go_package = "github.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicev1";
 //
 service User {
 	//

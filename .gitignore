@@ -2,8 +2,6 @@
 *.exe
 *.dll
 *.so
-user-service
-bin/
 
 # Specific paths
 services/user-service/bin/

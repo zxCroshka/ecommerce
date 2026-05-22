@@ -4,7 +4,7 @@
 // 	protoc        v3.21.12
 // source: userservice.proto
 
-package userservicrev1
+package userservicev1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -239,7 +239,7 @@ const file_userservice_proto_rawDesc = "" +
 	"\x04name\x18\x03 \x01(\tR\x04name2\xa4\x01\n" +
 	"\x04User\x12V\n" +
 	"\rValidateToken\x12!.userservice.ValidateTokenRequest\x1a\".userservice.ValidateTokenResponse\x12D\n" +
-	"\aGetUser\x12\x1b.userservice.GetUserRequest\x1a\x1c.userservice.GetUserResponseBIZGgithub.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicrev1b\x06proto3"
+	"\aGetUser\x12\x1b.userservice.GetUserRequest\x1a\x1c.userservice.GetUserResponseBHZFgithub.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicev1b\x06proto3"
 
 var (
 	file_userservice_proto_rawDescOnce sync.Once

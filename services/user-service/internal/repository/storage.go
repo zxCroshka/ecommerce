@@ -15,39 +15,7 @@ import (
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/users"
 )
 
-type Config struct {
-	Postgres struct {
-		Host     string
-		Port     uint16
-		User     string
-		Password string
-		Database string
-		Sslmode  string
-	}
-}
 
-func NewConfig(Postgres struct {
-	Host     string
-	Port     uint16
-	User     string
-	Password string
-	Database string
-	Sslmode  string
-}) Config {
-	return Config{
-		Postgres: Postgres,
-	}
-}
-func GetPostgresURL(cfg Config) string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		cfg.Postgres.User,
-		cfg.Postgres.Password,
-		cfg.Postgres.Host,
-		cfg.Postgres.Port,
-		cfg.Postgres.Database,
-		cfg.Postgres.Sslmode,
-	)
-}
 
 type Storage struct {
 	pool  *pgxpool.Pool

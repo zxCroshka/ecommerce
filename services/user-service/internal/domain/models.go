@@ -4,13 +4,6 @@ import (
 	"time"
 )
 
-type Role string
-
-var (
-	Admin    Role = "admin"
-	Customer Role = "customer"
-)
-
 type User struct {
 	Id        int64
 	Email     string

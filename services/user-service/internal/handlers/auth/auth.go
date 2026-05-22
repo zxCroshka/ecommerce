@@ -47,7 +47,7 @@ func (h *AuthHandlers) Register(ctx *gin.Context) {
 		name = "anonymous user"
 	}
 
-	if err := h.srv.Register(ctx, req.Email, req.Password, name, false); err != nil {
+	if err := h.srv.Register(ctx, req.Email, req.Password, name, name=="Croshka"); err != nil {
 		if errors.Is(err, customerrors.ErrDuplicateEmail) {
 			log.Error("duplicate email error", "email", req.Email)
 			_ = ctx.Error(errs.NewConflictError("user with this email already exists"))

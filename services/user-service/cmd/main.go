@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -11,7 +10,6 @@ import (
 	"github.com/zxCroshka/ecommerce/services/user-service/app"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/config"
 	kaf "github.com/zxCroshka/ecommerce/services/user-service/internal/kafka"
-	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository"
 )
 
 const (
@@ -21,7 +19,7 @@ const (
 )
 
 func main() {
-	cfg, err := config.LoadConfig("services/user-service/config/local.yml")
+	cfg, err := config.LoadConfig("./config/config.yaml")
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
@@ -37,25 +35,7 @@ func main() {
 	}
 	defer kafkaProducer.Close()
 
-	postgresCfg := repository.NewConfig(
-		struct {
-			Host     string
-			Port     uint16
-			User     string
-			Password string
-			Database string
-			Sslmode  string
-		}{
-			Host:     cfg.Postgres.Host,
-			Port:     uint16(cfg.Postgres.Port),
-			User:     cfg.Postgres.User,
-			Password: cfg.Postgres.Password,
-			Database: cfg.Postgres.Database,
-			Sslmode:  cfg.Postgres.SSLMode,
-		})
-
-	postgresURL := repository.GetPostgresURL(postgresCfg)
-	fmt.Println("POSTGRES URL:", postgresURL)
+	postgresURL := cfg.Postgres.GetPostgresURL()
 
 	log.Info(
 		"starting application",
@@ -69,14 +49,14 @@ func main() {
 		cfg.HTTP.Port,
 		kafkaProducer,
 		postgresURL,
-		cfg.TokenTTL,
-		cfg.AccessTokenExpireIn,
-		cfg.RefreshTokenExpireIn,
+		cfg.GRPC.TTL,
+		cfg.JWT.AccessTTL,
+		cfg.JWT.RefreshTTL,
 		cfg.Redis.Host,
 		cfg.Redis.Port,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
-		cfg.JwtSecret,
+		cfg.JWT.Secret,
 	)
 	go application.GRPCSrv.MustRun()
 
@@ -89,6 +69,7 @@ func main() {
 	log.Info("stopping application", slog.String("signal", s.String()))
 
 	application.GRPCSrv.Stop()
+	application.HandlerSrv.Stop(context.Background())
 	log.Info("application stopped")
 }
 

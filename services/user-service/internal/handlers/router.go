@@ -9,10 +9,14 @@ import (
 )
 
 type Router struct {
-	authHandler    *auth.AuthHandlers
-	userHandler    *user.UserHandlers
-	authMiddleware *middleware.AuthMiddleware
+	engine		  *gin.Engine
+	authHandler     *auth.AuthHandlers
+	userHandler     *user.UserHandlers
+	authMiddleware  *middleware.AuthMiddleware
 	errorMiddleware *middleware.ErrorMiddleware
+}
+func (r *Router) GetEngine() *gin.Engine {
+	return r.engine
 }
 
 func NewRouter(
@@ -21,16 +25,18 @@ func NewRouter(
 	authMiddleware *middleware.AuthMiddleware,
 	errorMiddleware *middleware.ErrorMiddleware,
 ) *Router {
+	engine := gin.Default()
 	return &Router{
-		authHandler:    authHandler,
-		userHandler:    userHandler,
-		authMiddleware: authMiddleware,
+		engine: engine,
+		authHandler:     authHandler,
+		userHandler:     userHandler,
+		authMiddleware:  authMiddleware,
 		errorMiddleware: errorMiddleware,
 	}
 }
 
-func (r *Router) SetupRoutes(router *gin.Engine) {
-	api := router.Group("/api/v1")
+func (r *Router) SetupRoutes() {
+	api := r.engine.Group("/api/v1")
 
 	auth := api.Group("/auth")
 	{
@@ -54,14 +60,13 @@ func (r *Router) SetupRoutes(router *gin.Engine) {
 	}
 }
 
-func (r *Router) Run(addr string)error {
-	router := gin.Default()
+func (r *Router) Run(addr string) error {
+	
+	r.engine.Use(r.errorMiddleware.ErrorHandler())
 
-	router.Use(r.errorMiddleware.ErrorHandler())
+	r.SetupRoutes()
 
-	r.SetupRoutes(router)
-
-	if err := router.Run(addr); err != nil {
+	if err := r.engine.Run(addr); err != nil {
 		return err
 	}
 	return nil

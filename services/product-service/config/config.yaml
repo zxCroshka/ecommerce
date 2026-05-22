@@ -1,0 +1,46 @@
+service:
+  name: "ecommerce-service-product"
+  environment: "local"
+
+http:
+  host: "0.0.0.0"
+  port: 8081
+
+grpc:
+  host: "0.0.0.0"
+  port: 9091
+  ttl: "1h"
+
+postgres:
+  host: "0.0.0.0"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  database: "ecommerce"
+  sslmode: "disable"
+  max_open_conns: 25
+  max_idle_conns: 5
+
+redis:
+  host: "0.0.0.0"
+  port: 6379
+  password: ""
+  db: 1
+  pool_size: 10
+  ttl:
+    product_cache: "5m"
+    products_list_cache: "5m"
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic:
+    product_updated: "product.updated"
+
+
+pagination:
+  default_limit: 20
+  max_limit: 100
+
+jwt:
+  secret: "local-dev-secret-key-2024-change-me-in-production"

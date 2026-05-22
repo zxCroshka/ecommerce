@@ -16,14 +16,15 @@ const (
 )
 
 var (
-	errUnknownType = errors.New("unknown event type")
+	topic          string = "user.registered"
+	errUnknownType        = errors.New("unknown event type")
 )
 
 type UserRegisteredEvent struct {
-	UserID    int64    `json:"user_id"`
+	UserID    int64  `json:"user_id"`
 	Email     string `json:"email"`
 	Name      string `json:"name"`
-	Role      string `json:"role"` 
+	Role      string `json:"role"`
 	Timestamp int64  `json:"timestamp"`
 }
 
@@ -55,14 +56,14 @@ func (p *Producer) Produce(userID int64, email, name string) error {
 	if err != nil {
 		return fmt.Errorf("error marshaling event: %w", err)
 	}
-	var topic string = "user.registered"
+
 	kafkamsg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{
 			Topic:     &topic,
 			Partition: kafka.PartitionAny,
 		},
 		Value:     value,
-		Key:       []byte(strconv.FormatInt(userID,10)),
+		Key:       []byte(strconv.FormatInt(userID, 10)),
 		Timestamp: time.Now(),
 	}
 

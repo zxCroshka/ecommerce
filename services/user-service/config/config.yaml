@@ -1,0 +1,44 @@
+service:
+  name: "ecommerce-service-user"
+  environment: "local"
+
+http:
+  host: "0.0.0.0"
+  port: 8080
+
+grpc:
+  host: "0.0.0.0"
+  port: 9090
+  ttl: "1h"
+
+postgres:
+  host: "0.0.0.0"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  database: "ecommerce"
+  sslmode: "disable"
+  max_open_conns: 25
+  max_idle_conns: 5
+
+redis:
+  host: "0.0.0.0"
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 10
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic:
+    user_registered: "user.registered"
+
+jwt:
+  secret: "local-dev-secret-key-2024-change-me-in-production"
+  access_ttl: "15m"
+  refresh_ttl: "168h"
+
+logging:
+  level: "debug"
+  format: "json"
