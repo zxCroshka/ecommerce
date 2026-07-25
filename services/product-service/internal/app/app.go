@@ -7,9 +7,9 @@ import (
 
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/app/grpcapp"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/app/handlersapp"
-	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/redis"
 	kaf "github.com/zxCroshka/ecommerce/services/product-service/internal/kafka"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/postgres"
+	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/redis"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/service"
 )
 
@@ -30,6 +30,8 @@ func New(
 	redisPort int,
 	redisPassword string,
 	redisDB int,
+	productCacheTTL time.Duration,
+	productsListCacheTTL time.Duration,
 	jwtSecret string,
 
 ) *App {
@@ -38,10 +40,12 @@ func New(
 		panic(err)
 	}
 	cfg := redis.Config{
-		Host:     redisHost,
-		Port:     redisPort,
-		Password: redisPassword,
-		DB:       redisDB,
+		Host:            redisHost,
+		Port:            redisPort,
+		Password:        redisPassword,
+		DB:              redisDB,
+		ProductTTL:      productCacheTTL,
+		ProductsListTTL: productsListCacheTTL,
 	}
 	redisClient, err := redis.NewClient(cfg)
 	if err != nil {
@@ -50,7 +54,7 @@ func New(
 
 	productService := service.New(log, storage, redisClient, producer)
 	grpcApp := grpcapp.New(log, productService, grpcPort)
-	handlersApp := handlersapp.New(log, productService, handlerPort,jwtSecret)
+	handlersApp := handlersapp.New(log, productService, handlerPort, jwtSecret)
 	return &App{
 		GRPCSrv:    grpcApp,
 		HandlerSrv: handlersApp,

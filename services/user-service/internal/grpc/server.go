@@ -13,7 +13,7 @@ import (
 )
 
 type UserService interface {
-	ValidateToken(ctx context.Context, token string) (int64, bool, error)
+	ValidateToken(ctx context.Context, token string) (int64, domain.Role, error)
 	GetUser(ctx context.Context, userID int64) (domain.User, error)
 }
 
@@ -32,16 +32,19 @@ func (s *ServerAPI) ValidateToken(ctx context.Context, req *userservicev1.Valida
 	if err := ValidateValidateToken(req); err != nil {
 		return nil, err
 	}
-	userID, isAdmin, err := s.usrservice.ValidateToken(ctx, req.GetToken())
+	userID, role, err := s.usrservice.ValidateToken(ctx, req.GetToken())
 	if err != nil {
+		if errors.Is(err, customerrors.ErrInvalidToken) {
+			return nil, status.Error(codes.Unauthenticated, "invalid token")
+		}
 		if errors.Is(err, customerrors.ErrTokenBlacklisted) {
-			return nil, status.Error(codes.PermissionDenied, "token is black listed")
+			return nil, status.Error(codes.Unauthenticated, "token is blacklisted")
 		}
 		return nil, status.Error(codes.Internal, "internal server error")
 	}
 	return &userservicev1.ValidateTokenResponse{
-		UserId:  userID,
-		IsAdmin: isAdmin,
+		UserId: userID,
+		Role:   string(role),
 	}, nil
 }
 
@@ -58,9 +61,9 @@ func (s *ServerAPI) GetUser(ctx context.Context, req *userservicev1.GetUserReque
 	}
 
 	return &userservicev1.GetUserResponse{
-		Email:   user.Email,
-		IsAdmin: user.IsAdmin,
-		Name:    user.Name,
+		Email: user.Email,
+		Role:  string(user.Role),
+		Name:  user.Name,
 	}, nil
 
 }

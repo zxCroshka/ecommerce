@@ -55,7 +55,10 @@ func (s *ServerAPI) ReserveStock(ctx context.Context, req *productservicev1.Rese
 			return nil, status.Error(codes.NotFound, "product not found")
 		}
 		if errors.Is(err, customerrors.ErrInsufficientStock) {
-			return nil, status.Error(codes.InvalidArgument, "insufficient stock")
+			return nil, status.Error(codes.FailedPrecondition, "insufficient stock")
+		}
+		if errors.Is(err, customerrors.ErrProductInactive) {
+			return nil, status.Error(codes.FailedPrecondition, "product is inactive")
 		}
 		return nil, status.Error(codes.Internal, "internal server error")
 	}

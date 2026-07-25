@@ -106,6 +106,56 @@ func TestDeleteRefreshToken(t *testing.T) {
 	})
 }
 
+func TestRotateRefreshToken(t *testing.T) {
+	redisClient, mr := setupTestRedis(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	const userID int64 = 123
+	const oldTokenID = "old-token"
+	const newTokenID = "new-token"
+	ttl := 7 * 24 * time.Hour
+
+	require.NoError(t, redisClient.SaveRefreshToken(ctx, userID, oldTokenID, ttl))
+
+	rotated, err := redisClient.RotateRefreshToken(ctx, userID, oldTokenID, newTokenID, ttl)
+	require.NoError(t, err)
+	assert.True(t, rotated)
+
+	oldExists, err := redisClient.ValidateRefreshToken(ctx, userID, oldTokenID)
+	require.NoError(t, err)
+	assert.False(t, oldExists)
+
+	newExists, err := redisClient.ValidateRefreshToken(ctx, userID, newTokenID)
+	require.NoError(t, err)
+	assert.True(t, newExists)
+
+	remainingTTL, err := redisClient.client.TTL(ctx, "refresh:123:new-token").Result()
+	require.NoError(t, err)
+	assert.Greater(t, remainingTTL, time.Duration(0))
+}
+
+func TestRotateRefreshToken_CanConsumeOldTokenOnlyOnce(t *testing.T) {
+	redisClient, mr := setupTestRedis(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	const userID int64 = 123
+	require.NoError(t, redisClient.SaveRefreshToken(ctx, userID, "old-token", time.Hour))
+
+	firstRotation, err := redisClient.RotateRefreshToken(ctx, userID, "old-token", "new-token-1", time.Hour)
+	require.NoError(t, err)
+	assert.True(t, firstRotation)
+
+	secondRotation, err := redisClient.RotateRefreshToken(ctx, userID, "old-token", "new-token-2", time.Hour)
+	require.NoError(t, err)
+	assert.False(t, secondRotation)
+
+	secondTokenExists, err := redisClient.ValidateRefreshToken(ctx, userID, "new-token-2")
+	require.NoError(t, err)
+	assert.False(t, secondTokenExists)
+}
+
 func TestAddToBlacklist(t *testing.T) {
 	redisClient, mr := setupTestRedis(t)
 	defer mr.Close()

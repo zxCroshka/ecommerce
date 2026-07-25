@@ -30,12 +30,12 @@ func (a *AuthInterceptor) unaryInterceptor() grpc.UnaryServerInterceptor {
 		if err != nil {
 			return nil, err
 		}
-		userId, isAdmin, err := a.validateToken(ctx, token)
+		userID, role, err := a.validateToken(ctx, token)
 		if err != nil {
 			return nil, err
 		}
-		ctx = context.WithValue(ctx, "userId", userId)
-		ctx = context.WithValue(ctx, "isAdmin", isAdmin)
+		ctx = context.WithValue(ctx, "userId", userID)
+		ctx = context.WithValue(ctx, "isAdmin", role == "admin")
 		return handler(ctx, req)
 	}
 
@@ -59,10 +59,10 @@ func extractTokenFromMetadata(ctx context.Context) (string, error) {
 	return parts[1], nil
 }
 
-func (a *AuthInterceptor) validateToken(ctx context.Context, token string) (int64, bool, error) {
+func (a *AuthInterceptor) validateToken(ctx context.Context, token string) (int64, string, error) {
 	resp, err := a.userServiceClient.ValidateToken(ctx, &userservicev1.ValidateTokenRequest{Token: token})
 	if err != nil {
-		return 0, false, status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
+		return 0, "", status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
 	}
-	return resp.UserId, resp.IsAdmin, nil
+	return resp.UserId, resp.Role, nil
 }

@@ -53,24 +53,32 @@ func New(ctx context.Context, storageURL string) (*Storage, error) {
 	}, nil
 }
 
-func (s *Storage) ReserveStockTX(ctx context.Context, productID int64, quantity int64) error {
-	return db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
+func (s *Storage) ReserveStockTX(ctx context.Context, productID int64, quantity int64) (int64, error) {
+	var newStock int64
+	err := db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
 		products := s.products.WithTX(tx)
-		if err := products.ReserveStock(ctx, productID, quantity); err != nil {
+		stock, err := products.ReserveStock(ctx, productID, quantity)
+		if err != nil {
 			return err
 		}
+		newStock = stock
 		return nil
 	})
+	return newStock, err
 }
 
-func (s *Storage) ReleaseStockTX(ctx context.Context, productID int64, quantity int64) error {
-	return db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
+func (s *Storage) ReleaseStockTX(ctx context.Context, productID int64, quantity int64) (int64, error) {
+	var newStock int64
+	err := db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
 		products := s.products.WithTX(tx)
-		if err := products.ReleaseStock(ctx, productID, quantity); err != nil {
+		stock, err := products.ReleaseStock(ctx, productID, quantity)
+		if err != nil {
 			return err
 		}
+		newStock = stock
 		return nil
 	})
+	return newStock, err
 }
 
 func (s *Storage) SaveProduct(
@@ -81,27 +89,25 @@ func (s *Storage) SaveProduct(
 	images []string,
 	isActive bool,
 ) (int64, error) {
-	return s.products.Insert(ctx, name, description, price, stock, category, images, isActive, time.Now(),time.Now())
+	return s.products.Insert(ctx, name, description, price, stock, category, images, isActive, time.Now(), time.Now())
 }
 
 func (s *Storage) UpdateProductFields(
 	ctx context.Context,
 	productID int64,
-	fields map[string]any,
+	patch domain.ProductPatch,
 ) error {
-	return s.products.UpdateProductFields(ctx, productID, fields)
+	return s.products.UpdateProductFields(ctx, productID, patch)
 }
 
 func (s *Storage) ListProducts(ctx context.Context, req domain.ProductListRequest) ([]*domain.Product, int64, error) {
-	return s.products.ListProducts(ctx,req)
+	return s.products.ListProducts(ctx, req)
 }
 
 func (s *Storage) SoftDelete(ctx context.Context, productID int64) error {
-	return s.products.SoftDelete(ctx,productID)
+	return s.products.SoftDelete(ctx, productID)
 }
-
 
 func (s *Storage) GetProduct(ctx context.Context, productID int64) (*domain.Product, error) {
-	return s.products.GetProduct(ctx,productID)
+	return s.products.GetProduct(ctx, productID)
 }
-

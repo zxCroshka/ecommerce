@@ -26,34 +26,34 @@ func (s *Storage) WithTX(tx pgx.Tx) *Storage {
 	return &Storage{db: tx}
 }
 
-func (s *Storage) SaveUser(ctx context.Context, email string, passHash []byte, name string, isAdmin bool, created_at time.Time) (int64,error) {
+func (s *Storage) SaveUser(ctx context.Context, email string, passHash []byte, name string, role domain.Role, createdAt time.Time) (int64, error) {
 	const op = "storage.postgres.SaveUser"
-	stmt := `INSERT INTO userservice.users(email,password_hash,name,is_admin,created_at)
+	stmt := `INSERT INTO userservice.users(email,password_hash,name,role,created_at)
 			VALUES($1,$2,$3,$4,$5)
 			RETURNING id`
 	var userID int64
-	err := s.db.QueryRow(ctx, stmt, email, passHash, name, isAdmin, created_at).Scan(&userID)
+	err := s.db.QueryRow(ctx, stmt, email, passHash, name, string(role), createdAt).Scan(&userID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			if pgErr.Code == "23505" {
-				return 0,fmt.Errorf("%s: %w", op, customerrors.ErrUserExists)
+				return 0, fmt.Errorf("%s: %w", op, customerrors.ErrDuplicateEmail)
 			}
 		}
-		return 0,fmt.Errorf("%s: %w", op, err)
+		return 0, fmt.Errorf("%s: %w", op, err)
 	}
-	return userID,nil
+	return userID, nil
 }
 
 func (s *Storage) User(ctx context.Context, email string) (domain.User, error) {
 	const op = "storage.postgres.User"
-	stmt := `SELECT * FROM userservice.users WHERE email=$1`
+	stmt := `SELECT id,email,password_hash,name,role,created_at FROM userservice.users WHERE email=$1`
 	row := s.db.QueryRow(ctx, stmt, email)
 	var user domain.User
-	err := row.Scan(&user.Id, &user.Email, &user.PassHash, &user.Name, &user.IsAdmin, &user.CreatedAt)
+	err := row.Scan(&user.Id, &user.Email, &user.PassHash, &user.Name, &user.Role, &user.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.User{}, fmt.Errorf("%s: %w",op, customerrors.ErrUserNotFound)
+			return domain.User{}, fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
 		}
 		return domain.User{}, fmt.Errorf("%s: %w", op, err)
 	}
@@ -61,30 +61,30 @@ func (s *Storage) User(ctx context.Context, email string) (domain.User, error) {
 }
 func (s *Storage) UserByID(ctx context.Context, userID int64) (domain.User, error) {
 	const op = "storage.postgres.UserByID"
-	stmt := `SELECT * FROM userservice.users WHERE id=$1`
+	stmt := `SELECT id,email,password_hash,name,role,created_at FROM userservice.users WHERE id=$1`
 	row := s.db.QueryRow(ctx, stmt, userID)
 	var user domain.User
-	err := row.Scan(&user.Id, &user.Email, &user.PassHash, &user.Name, &user.IsAdmin, &user.CreatedAt)
+	err := row.Scan(&user.Id, &user.Email, &user.PassHash, &user.Name, &user.Role, &user.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.User{}, fmt.Errorf("%s: %w",op, customerrors.ErrUserNotFound)
+			return domain.User{}, fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
 		}
 		return domain.User{}, fmt.Errorf("%s: %w", op, err)
 	}
 	return user, nil
 }
-func (s *Storage) IsAdmin(ctx context.Context, userID int64) (bool, error) {
-	const op = "storage.postgres.IsAdmin"
-	stmt := `SELECT is_admin FROM userservice.users WHERE id=$1`
+func (s *Storage) Role(ctx context.Context, userID int64) (domain.Role, error) {
+	const op = "storage.postgres.Role"
+	stmt := `SELECT role FROM userservice.users WHERE id=$1`
 	row := s.db.QueryRow(ctx, stmt, userID)
-	var isAdmin bool
-	if err := row.Scan(&isAdmin); err != nil {
+	var role domain.Role
+	if err := row.Scan(&role); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
+			return "", fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
 		}
-		return false, fmt.Errorf("%s: %w", op, err)
+		return "", fmt.Errorf("%s: %w", op, err)
 	}
-	return isAdmin, nil
+	return role, nil
 }
 
 func (s *Storage) UpdateName(ctx context.Context, userID int64, newName string) error {
@@ -100,6 +100,12 @@ func (s *Storage) UpdateEmail(ctx context.Context, userID int64, newEmail string
 	const op = "storage.postgres.UpdateName"
 	stmt := `UPDATE userservice.users SET email=$1 WHERE id=$2`
 	if _, err := s.db.Exec(ctx, stmt, newEmail, userID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == "23505" {
+				return fmt.Errorf("%s: %w", op, customerrors.ErrDuplicateEmail)
+			}
+		}
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil

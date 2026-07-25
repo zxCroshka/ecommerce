@@ -38,8 +38,8 @@ type MockUserManager struct {
 	mock.Mock
 }
 
-func (m *MockUserManager) RegisterUserTX(ctx context.Context, email string, passHash []byte, name string, isAdmin bool) (int64, error) {
-	args := m.Called(ctx, email, passHash, name, isAdmin)
+func (m *MockUserManager) RegisterUserTX(ctx context.Context, email string, passHash []byte, name string, role domain.Role) (int64, error) {
+	args := m.Called(ctx, email, passHash, name, role)
 	return args.Get(0).(int64), args.Error(1)
 }
 
@@ -53,9 +53,9 @@ func (m *MockUserManager) UserByID(ctx context.Context, userID int64) (domain.Us
 	return args.Get(0).(domain.User), args.Error(1)
 }
 
-func (m *MockUserManager) IsAdmin(ctx context.Context, userID int64) (bool, error) {
+func (m *MockUserManager) Role(ctx context.Context, userID int64) (domain.Role, error) {
 	args := m.Called(ctx, userID)
-	return args.Bool(0), args.Error(1)
+	return args.Get(0).(domain.Role), args.Error(1)
 }
 
 func (m *MockUserManager) UpdateName(ctx context.Context, userID int64, newName string) error {
@@ -102,6 +102,11 @@ func (m *MockTokenManager) IsBlacklisted(ctx context.Context, tokenID string) (b
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockTokenManager) RotateRefreshToken(ctx context.Context, userID int64, oldKeyID string, newKeyID string, ttl time.Duration) (bool, error) {
+	args := m.Called(ctx, userID, oldKeyID, newKeyID, ttl)
+	return args.Bool(0), args.Error(1)
+}
+
 type MockProducer struct {
 	mock.Mock
 }
@@ -119,8 +124,8 @@ type MockJWTManager struct {
 	mock.Mock
 }
 
-func (m *MockJWTManager) GenerateTokenPair(userID int64, email string, isAdmin bool) (*jwt.TokenPair, string, error) {
-	args := m.Called(userID, email, isAdmin)
+func (m *MockJWTManager) GenerateTokenPair(userID int64, email string, role domain.Role) (*jwt.TokenPair, string, error) {
+	args := m.Called(userID, email, role)
 	if args.Get(0) == nil {
 		return nil, args.String(1), args.Error(2)
 	}
@@ -140,6 +145,22 @@ func (m *MockJWTManager) GetRefreshTTL() time.Duration {
 	return args.Get(0).(time.Duration)
 }
 
+func (m *MockJWTManager) ValidateAccessToken(tokenString string) (*jwt.TokenClaims, error) {
+	args := m.Called(tokenString)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*jwt.TokenClaims), args.Error(1)
+}
+
+func (m *MockJWTManager) ValidateRefreshToken(tokenString string) (*jwt.TokenClaims, error) {
+	args := m.Called(tokenString)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*jwt.TokenClaims), args.Error(1)
+}
+
 // ========== TESTS ==========
 
 func TestUserService_Register(t *testing.T) {
@@ -148,7 +169,6 @@ func TestUserService_Register(t *testing.T) {
 		email       string
 		password    string
 		nameInput   string
-		isAdmin     bool
 		setupMock   func(*MockUserManager, *MockProducer)
 		expectedErr error
 	}{
@@ -157,9 +177,8 @@ func TestUserService_Register(t *testing.T) {
 			email:     "test@example.com",
 			password:  "password123",
 			nameInput: "Test User",
-			isAdmin:   false,
 			setupMock: func(um *MockUserManager, p *MockProducer) {
-				um.On("RegisterUserTX", mock.Anything, "test@example.com", mock.Anything, "Test User", false).
+				um.On("RegisterUserTX", mock.Anything, "test@example.com", mock.Anything, "Test User", domain.RoleCustomer).
 					Return(int64(1), nil)
 				// ✅ Используем Maybe() для горутины
 				p.On("Produce", int64(1), "test@example.com", "Test User").
@@ -168,13 +187,12 @@ func TestUserService_Register(t *testing.T) {
 			expectedErr: nil,
 		},
 		{
-			name:      "success - register admin",
+			name:      "success - registration always creates customer",
 			email:     "admin@example.com",
 			password:  "password123",
 			nameInput: "Admin User",
-			isAdmin:   true,
 			setupMock: func(um *MockUserManager, p *MockProducer) {
-				um.On("RegisterUserTX", mock.Anything, "admin@example.com", mock.Anything, "Admin User", true).
+				um.On("RegisterUserTX", mock.Anything, "admin@example.com", mock.Anything, "Admin User", domain.RoleCustomer).
 					Return(int64(2), nil)
 				// ✅ Используем Maybe() для горутины
 				p.On("Produce", int64(2), "admin@example.com", "Admin User").
@@ -187,9 +205,8 @@ func TestUserService_Register(t *testing.T) {
 			email:     "existing@example.com",
 			password:  "password123",
 			nameInput: "Test User",
-			isAdmin:   false,
 			setupMock: func(um *MockUserManager, p *MockProducer) {
-				um.On("RegisterUserTX", mock.Anything, "existing@example.com", mock.Anything, "Test User", false).
+				um.On("RegisterUserTX", mock.Anything, "existing@example.com", mock.Anything, "Test User", domain.RoleCustomer).
 					Return(int64(0), customerrors.ErrDuplicateEmail)
 			},
 			expectedErr: customerrors.ErrDuplicateEmail,
@@ -206,7 +223,7 @@ func TestUserService_Register(t *testing.T) {
 			tt.setupMock(mockUM, mockProd)
 
 			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
-			err := svc.Register(context.Background(), tt.email, tt.password, tt.nameInput, tt.isAdmin)
+			err := svc.Register(context.Background(), tt.email, tt.password, tt.nameInput)
 
 			if tt.expectedErr != nil {
 				assert.Error(t, err)
@@ -243,10 +260,10 @@ func TestUserService_Login(t *testing.T) {
 						Email:     "test@example.com",
 						PassHash:  hashedPassword,
 						Name:      "Test User",
-						IsAdmin:   false,
+						Role:      domain.RoleCustomer,
 						CreatedAt: time.Now(),
 					}, nil)
-				jm.On("GenerateTokenPair", int64(1), "test@example.com", false).
+				jm.On("GenerateTokenPair", int64(1), "test@example.com", domain.RoleCustomer).
 					Return(&jwt.TokenPair{AccessToken: "access-token", RefreshToken: "refresh-token"}, "refresh-id", nil)
 				jm.On("GetRefreshTTL").Return(168 * time.Hour)
 				tm.On("SaveRefreshToken", mock.Anything, int64(1), "refresh-id", 168*time.Hour).
@@ -275,7 +292,7 @@ func TestUserService_Login(t *testing.T) {
 						Email:    "test@example.com",
 						PassHash: hashedPassword,
 						Name:     "Test User",
-						IsAdmin:  false,
+						Role:     domain.RoleCustomer,
 					}, nil)
 			},
 			expectedErr: customerrors.ErrInvalidCredentials,
@@ -310,9 +327,9 @@ func TestUserService_Login(t *testing.T) {
 
 func TestUserService_RefreshTokens(t *testing.T) {
 	claims := &jwt.TokenClaims{
-		UserID:  1,
-		Email:   "test@example.com",
-		IsAdmin: false,
+		UserID: 1,
+		Email:  "test@example.com",
+		Role:   domain.RoleCustomer,
 		RegisteredClaims: jwt5.RegisteredClaims{
 			ID: "old-refresh-id",
 		},
@@ -328,17 +345,13 @@ func TestUserService_RefreshTokens(t *testing.T) {
 			name:         "success - refresh tokens",
 			refreshToken: "valid-refresh-token",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-refresh-token").
+				jm.On("ValidateRefreshToken", "valid-refresh-token").
 					Return(claims, nil)
-				tm.On("ValidateRefreshToken", mock.Anything, int64(1), "old-refresh-id").
-					Return(true, nil)
-				tm.On("DeleteRefreshToken", mock.Anything, int64(1), "old-refresh-id").
-					Return(nil)
-				jm.On("GenerateTokenPair", int64(1), "test@example.com", false).
+				jm.On("GenerateTokenPair", int64(1), "test@example.com", domain.RoleCustomer).
 					Return(&jwt.TokenPair{AccessToken: "new-access", RefreshToken: "new-refresh"}, "new-refresh-id", nil)
 				jm.On("GetRefreshTTL").Return(168 * time.Hour)
-				tm.On("SaveRefreshToken", mock.Anything, int64(1), "new-refresh-id", 168*time.Hour).
-					Return(nil)
+				tm.On("RotateRefreshToken", mock.Anything, int64(1), "old-refresh-id", "new-refresh-id", 168*time.Hour).
+					Return(true, nil)
 			},
 			expectedErr: nil,
 		},
@@ -346,7 +359,7 @@ func TestUserService_RefreshTokens(t *testing.T) {
 			name:         "error - invalid refresh token",
 			refreshToken: "invalid-token",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "invalid-token").
+				jm.On("ValidateRefreshToken", "invalid-token").
 					Return(nil, customerrors.ErrInvalidToken)
 			},
 			expectedErr: customerrors.ErrInvalidToken,
@@ -355,12 +368,15 @@ func TestUserService_RefreshTokens(t *testing.T) {
 			name:         "error - token not found in redis",
 			refreshToken: "valid-refresh-token",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-refresh-token").
+				jm.On("ValidateRefreshToken", "valid-refresh-token").
 					Return(claims, nil)
-				tm.On("ValidateRefreshToken", mock.Anything, int64(1), "old-refresh-id").
+				jm.On("GenerateTokenPair", int64(1), "test@example.com", domain.RoleCustomer).
+					Return(&jwt.TokenPair{AccessToken: "new-access", RefreshToken: "new-refresh"}, "new-refresh-id", nil)
+				jm.On("GetRefreshTTL").Return(168 * time.Hour)
+				tm.On("RotateRefreshToken", mock.Anything, int64(1), "old-refresh-id", "new-refresh-id", 168*time.Hour).
 					Return(false, nil)
 			},
-			expectedErr: errors.New(""), // Любая ошибка
+			expectedErr: customerrors.ErrRefreshTokenNotFound,
 		},
 	}
 
@@ -377,7 +393,7 @@ func TestUserService_RefreshTokens(t *testing.T) {
 			_, err := svc.RefreshTokens(context.Background(), tt.refreshToken)
 
 			if tt.expectedErr != nil {
-				assert.Error(t, err)
+				assert.ErrorIs(t, err, tt.expectedErr)
 			} else {
 				assert.NoError(t, err)
 			}
@@ -390,6 +406,7 @@ func TestUserService_RefreshTokens(t *testing.T) {
 
 func TestUserService_Logout(t *testing.T) {
 	accessClaims := &jwt.TokenClaims{
+		UserID: 1,
 		RegisteredClaims: jwt5.RegisteredClaims{
 			ID:        "access-id",
 			ExpiresAt: jwt5.NewNumericDate(time.Now().Add(15 * time.Minute)),
@@ -414,9 +431,9 @@ func TestUserService_Logout(t *testing.T) {
 			accessToken:  "valid-access",
 			refreshToken: "valid-refresh",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-access").
+				jm.On("ValidateAccessToken", "valid-access").
 					Return(accessClaims, nil)
-				jm.On("ValidateToken", "valid-refresh").
+				jm.On("ValidateRefreshToken", "valid-refresh").
 					Return(refreshClaims, nil)
 				tm.On("AddToBlacklist", mock.Anything, "access-id", mock.Anything).
 					Return(nil)
@@ -430,7 +447,7 @@ func TestUserService_Logout(t *testing.T) {
 			accessToken:  "invalid-access",
 			refreshToken: "valid-refresh",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "invalid-access").
+				jm.On("ValidateAccessToken", "invalid-access").
 					Return(nil, customerrors.ErrInvalidToken)
 			},
 			expectedErr: customerrors.ErrInvalidToken,
@@ -450,7 +467,7 @@ func TestUserService_Logout(t *testing.T) {
 			err := svc.Logout(context.Background(), tt.accessToken, tt.refreshToken)
 
 			if tt.expectedErr != nil {
-				assert.Error(t, err)
+				assert.ErrorIs(t, err, tt.expectedErr)
 			} else {
 				assert.NoError(t, err)
 			}
@@ -461,41 +478,99 @@ func TestUserService_Logout(t *testing.T) {
 	}
 }
 
+func TestUserService_LogoutRejectsTokensFromDifferentUsers(t *testing.T) {
+	accessClaims := &jwt.TokenClaims{
+		UserID: 1,
+		RegisteredClaims: jwt5.RegisteredClaims{
+			ID:        "access-id",
+			ExpiresAt: jwt5.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		},
+	}
+	refreshClaims := &jwt.TokenClaims{
+		UserID: 2,
+		RegisteredClaims: jwt5.RegisteredClaims{
+			ID: "refresh-id",
+		},
+	}
+
+	mockUM := new(MockUserManager)
+	mockTM := new(MockTokenManager)
+	mockProd := new(MockProducer)
+	mockJWT := new(MockJWTManager)
+	mockJWT.On("ValidateAccessToken", "access-token").Return(accessClaims, nil)
+	mockJWT.On("ValidateRefreshToken", "refresh-token").Return(refreshClaims, nil)
+
+	svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+	err := svc.Logout(context.Background(), "access-token", "refresh-token")
+
+	assert.ErrorIs(t, err, customerrors.ErrInvalidToken)
+	mockTM.AssertNotCalled(t, "DeleteRefreshToken")
+	mockTM.AssertNotCalled(t, "AddToBlacklist")
+}
+
+func TestUserService_RefreshTokensRotationFailure(t *testing.T) {
+	claims := &jwt.TokenClaims{
+		UserID: 1,
+		Email:  "test@example.com",
+		Role:   domain.RoleCustomer,
+		RegisteredClaims: jwt5.RegisteredClaims{
+			ID: "old-refresh-id",
+		},
+	}
+
+	mockUM := new(MockUserManager)
+	mockTM := new(MockTokenManager)
+	mockProd := new(MockProducer)
+	mockJWT := new(MockJWTManager)
+	mockJWT.On("ValidateRefreshToken", "refresh-token").Return(claims, nil)
+	mockJWT.On("GenerateTokenPair", int64(1), "test@example.com", domain.RoleCustomer).
+		Return(&jwt.TokenPair{AccessToken: "new-access", RefreshToken: "new-refresh"}, "new-refresh-id", nil)
+	mockJWT.On("GetRefreshTTL").Return(168 * time.Hour)
+	mockTM.On("RotateRefreshToken", mock.Anything, int64(1), "old-refresh-id", "new-refresh-id", 168*time.Hour).
+		Return(false, nil)
+
+	svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+	pair, err := svc.RefreshTokens(context.Background(), "refresh-token")
+
+	assert.Nil(t, pair)
+	assert.ErrorIs(t, err, customerrors.ErrRefreshTokenNotFound)
+}
+
 func TestUserService_ValidateToken(t *testing.T) {
 	claims := &jwt.TokenClaims{
-		UserID:  1,
-		IsAdmin: false,
+		UserID: 1,
+		Role:   domain.RoleCustomer,
 		RegisteredClaims: jwt5.RegisteredClaims{
 			ID: "token-id",
 		},
 	}
 
 	tests := []struct {
-		name            string
-		token           string
-		setupMock       func(*MockJWTManager, *MockTokenManager)
-		expectedUserID  int64
-		expectedIsAdmin bool
-		expectedErr     error
+		name           string
+		token          string
+		setupMock      func(*MockJWTManager, *MockTokenManager)
+		expectedUserID int64
+		expectedRole   domain.Role
+		expectedErr    error
 	}{
 		{
 			name:  "success - valid token",
 			token: "valid-token",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				tm.On("IsBlacklisted", mock.Anything, "token-id").
 					Return(false, nil)
 			},
-			expectedUserID:  1,
-			expectedIsAdmin: false,
-			expectedErr:     nil,
+			expectedUserID: 1,
+			expectedRole:   domain.RoleCustomer,
+			expectedErr:    nil,
 		},
 		{
 			name:  "error - blacklisted token",
 			token: "blacklisted-token",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "blacklisted-token").
+				jm.On("ValidateAccessToken", "blacklisted-token").
 					Return(claims, nil)
 				tm.On("IsBlacklisted", mock.Anything, "token-id").
 					Return(true, nil)
@@ -506,7 +581,7 @@ func TestUserService_ValidateToken(t *testing.T) {
 			name:  "error - invalid token",
 			token: "invalid-token",
 			setupMock: func(jm *MockJWTManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "invalid-token").
+				jm.On("ValidateAccessToken", "invalid-token").
 					Return(nil, customerrors.ErrInvalidToken)
 			},
 			expectedErr: customerrors.ErrInvalidToken,
@@ -523,7 +598,7 @@ func TestUserService_ValidateToken(t *testing.T) {
 			tt.setupMock(mockJWT, mockTM)
 
 			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
-			userID, isAdmin, err := svc.ValidateToken(context.Background(), tt.token)
+			userID, role, err := svc.ValidateToken(context.Background(), tt.token)
 
 			if tt.expectedErr != nil {
 				assert.Error(t, err)
@@ -531,7 +606,7 @@ func TestUserService_ValidateToken(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedUserID, userID)
-				assert.Equal(t, tt.expectedIsAdmin, isAdmin)
+				assert.Equal(t, tt.expectedRole, role)
 			}
 
 			mockJWT.AssertExpectations(t)
@@ -542,10 +617,10 @@ func TestUserService_ValidateToken(t *testing.T) {
 
 func TestUserService_GetUser(t *testing.T) {
 	expectedUser := domain.User{
-		Id:      1,
-		Email:   "test@example.com",
-		Name:    "Test User",
-		IsAdmin: false,
+		Id:    1,
+		Email: "test@example.com",
+		Name:  "Test User",
+		Role:  domain.RoleCustomer,
 	}
 
 	tests := []struct {
@@ -617,7 +692,7 @@ func TestUserService_UpdateEmail(t *testing.T) {
 			token:    "valid-token",
 			newEmail: "new@example.com",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("User", mock.Anything, "new@example.com").
 					Return(domain.User{Id: 0}, customerrors.ErrUserNotFound)
@@ -631,7 +706,7 @@ func TestUserService_UpdateEmail(t *testing.T) {
 			token:    "valid-token",
 			newEmail: "existing@example.com",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("User", mock.Anything, "existing@example.com").
 					Return(domain.User{Id: 2}, nil)
@@ -643,7 +718,7 @@ func TestUserService_UpdateEmail(t *testing.T) {
 			token:    "valid-token",
 			newEmail: "old@example.com",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("User", mock.Anything, "old@example.com").
 					Return(domain.User{Id: 1}, nil)
@@ -655,7 +730,7 @@ func TestUserService_UpdateEmail(t *testing.T) {
 			token:    "invalid-token",
 			newEmail: "new@example.com",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager) {
-				jm.On("ValidateToken", "invalid-token").
+				jm.On("ValidateAccessToken", "invalid-token").
 					Return(nil, customerrors.ErrInvalidToken)
 			},
 			expectedErr: customerrors.ErrInvalidToken,
@@ -704,7 +779,7 @@ func TestUserService_UpdateName(t *testing.T) {
 			token:   "valid-token",
 			newName: "New Name",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("UpdateName", mock.Anything, int64(1), "New Name").
 					Return(nil)
@@ -716,7 +791,7 @@ func TestUserService_UpdateName(t *testing.T) {
 			token:   "invalid-token",
 			newName: "New Name",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager) {
-				jm.On("ValidateToken", "invalid-token").
+				jm.On("ValidateAccessToken", "invalid-token").
 					Return(nil, customerrors.ErrInvalidToken)
 			},
 			expectedErr: customerrors.ErrInvalidToken,
@@ -771,7 +846,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			oldPassword: "oldpass123",
 			newPassword: "newpass123",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("User", mock.Anything, "test@example.com").
 					Return(domain.User{
@@ -801,7 +876,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			oldPassword: "wrongpass",
 			newPassword: "newpass123",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("User", mock.Anything, "test@example.com").
 					Return(domain.User{
@@ -818,7 +893,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			oldPassword: "oldpass123",
 			newPassword: "newpass123",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "valid-token").
+				jm.On("ValidateAccessToken", "valid-token").
 					Return(claims, nil)
 				um.On("User", mock.Anything, "test@example.com").
 					Return(domain.User{}, customerrors.ErrUserNotFound)
@@ -831,7 +906,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			oldPassword: "oldpass123",
 			newPassword: "newpass123",
 			setupMock: func(jm *MockJWTManager, um *MockUserManager, tm *MockTokenManager) {
-				jm.On("ValidateToken", "invalid-token").
+				jm.On("ValidateAccessToken", "invalid-token").
 					Return(nil, customerrors.ErrInvalidToken)
 			},
 			expectedErr: customerrors.ErrInvalidToken,

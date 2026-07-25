@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -42,7 +41,7 @@ func (s *Storage) Insert(
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			RETURNING id `
 	var id int64
-	if err := s.db.QueryRow(ctx, stmt, name, description, price, stock, category, images, isActive, createdAt,updatedAt).Scan(&id); err != nil {
+	if err := s.db.QueryRow(ctx, stmt, name, description, price, stock, category, images, isActive, createdAt, updatedAt).Scan(&id); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			if pgErr.Code == "23505" {
@@ -57,7 +56,7 @@ func (s *Storage) Insert(
 func (s *Storage) UpdateProductFields(
 	ctx context.Context,
 	productID int64,
-	fields map[string]any,
+	patch domain.ProductPatch,
 ) error {
 	const op = "storage.postgres.product.UpdateProductFields"
 
@@ -69,31 +68,24 @@ func (s *Storage) UpdateProductFields(
 		return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
 	}
 
-	if len(fields) == 0 {
+	if patch.Empty() {
 		return fmt.Errorf("%s: no fields to update", op)
 	}
-	fields["updated_at"] = time.Now()
 
-	set := make([]string, 0, len(fields))
-	args := make([]any, 0, len(fields)+1)
-	argCounter := 1
-
-	for field, value := range fields {
-		set = append(set, fmt.Sprintf("%s=$%d", field, argCounter))
-		args = append(args, value)
-		argCounter++
-	}
-	
-	args = append(args, productID)
-
-	stmt := fmt.Sprintf(
-		"UPDATE productservice.products SET %s WHERE id=$%d",
-		strings.Join(set, ", "),
-		argCounter,
-	)
-
-	if _, err := s.db.Exec(ctx, stmt, args...); err != nil {
+	stmt := `UPDATE productservice.products SET
+		name = COALESCE($1, name), description = COALESCE($2, description),
+		price = COALESCE($3, price), stock = COALESCE($4, stock),
+		category = COALESCE($5, category),
+		images = CASE WHEN $6 THEN $7 ELSE images END,
+		is_active = COALESCE($8, is_active), updated_at = NOW()
+		WHERE id = $9`
+	result, err := s.db.Exec(ctx, stmt, patch.Name, patch.Description, patch.Price, patch.Stock,
+		patch.Category, patch.ImagesSet, patch.Images, patch.IsActive, productID)
+	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
 	}
 
 	return nil
@@ -106,12 +98,12 @@ func (s *Storage) ListProducts(ctx context.Context, req domain.ProductListReques
 	argCounter := 1
 	if req.Filter.Category != nil {
 		baseStmt += fmt.Sprintf(" AND category=$%d", argCounter)
-		args = append(args, req.Filter.Category)
+		args = append(args, *req.Filter.Category)
 		argCounter++
 	}
 	if req.Filter.IsActive != nil {
 		baseStmt += fmt.Sprintf(" AND is_active=$%d", argCounter)
-		args = append(args, req.Filter.IsActive)
+		args = append(args, *req.Filter.IsActive)
 		argCounter++
 	}
 
@@ -130,6 +122,8 @@ func (s *Storage) ListProducts(ctx context.Context, req domain.ProductListReques
 		sortField = "price"
 	case domain.SortByCreatedAt:
 		sortField = "created_at"
+	case domain.SortByName:
+		sortField = "name"
 	default:
 		sortField = "id"
 	}
@@ -160,9 +154,13 @@ func (s *Storage) ListProducts(ctx context.Context, req domain.ProductListReques
 
 func (s *Storage) SoftDelete(ctx context.Context, productID int64) error {
 	const op = "storage.postgres.product.SoftDelete"
-	stmt := "UPDATE productservice.products SET is_active=$1 WHERE id=$2"
-	if _, err := s.db.Exec(ctx, stmt, false, productID); err != nil {
+	stmt := "UPDATE productservice.products SET is_active=false, updated_at=NOW() WHERE id=$1 AND is_active=true"
+	result, err := s.db.Exec(ctx, stmt, productID)
+	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
 	}
 	return nil
 }
@@ -185,40 +183,46 @@ func (s *Storage) GetProduct(ctx context.Context, productID int64) (*domain.Prod
 	return product, nil
 }
 
-func (s *Storage) ReserveStock(ctx context.Context, productID int64, quantity int64) error {
+func (s *Storage) ReserveStock(ctx context.Context, productID int64, quantity int64) (int64, error) {
 	const op = "storage.postgres.product.ReserveStock"
 
+	var newStock int64
+	stmt := `UPDATE productservice.products
+		SET stock = stock - $1, updated_at = NOW()
+		WHERE id = $2 AND is_active = true AND stock >= $1
+		RETURNING stock`
+	if err := s.db.QueryRow(ctx, stmt, quantity, productID).Scan(&newStock); err == nil {
+		return newStock, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("%s: %w", op, err)
+	}
+
+	var active bool
 	var stock int64
-	stmt := `SELECT stock FROM productservice.products WHERE id = $1 FOR UPDATE`
-
-	if err := s.db.QueryRow(ctx, stmt, productID).Scan(&stock); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT is_active, stock FROM productservice.products WHERE id=$1`, productID).Scan(&active, &stock); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
+			return 0, fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
 		}
-		return fmt.Errorf("%s: %w", op, err)
+		return 0, fmt.Errorf("%s: %w", op, err)
 	}
-
-	if stock < quantity {
-		return fmt.Errorf("%s: %w", op, customerrors.ErrInsufficientStock)
+	if !active {
+		return 0, fmt.Errorf("%s: %w", op, customerrors.ErrProductInactive)
 	}
-
-	updateStmt := `UPDATE productservice.products SET stock = stock - $1 WHERE id = $2`
-	if _, err := s.db.Exec(ctx, updateStmt, quantity, productID); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	return nil
+	return 0, fmt.Errorf("%s: %w", op, customerrors.ErrInsufficientStock)
 }
 
-func (s *Storage) ReleaseStock(ctx context.Context, productID int64, quantity int64) error {
+func (s *Storage) ReleaseStock(ctx context.Context, productID int64, quantity int64) (int64, error) {
 	const op = "storage.postgres.product.ReleaseStock"
 
-	stmt := `UPDATE productservice.products SET stock = stock + $1 WHERE id = $2`
-	if _, err := s.db.Exec(ctx, stmt, quantity, productID); err != nil {
-		return fmt.Errorf("%s: %w", op, err)
+	var newStock int64
+	stmt := `UPDATE productservice.products SET stock = stock + $1, updated_at = NOW() WHERE id = $2 RETURNING stock`
+	if err := s.db.QueryRow(ctx, stmt, quantity, productID).Scan(&newStock); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
+		}
+		return 0, fmt.Errorf("%s: %w", op, err)
 	}
-
-	return nil
+	return newStock, nil
 }
 
 func (s *Storage) productExists(ctx context.Context, id int64) (bool, error) {

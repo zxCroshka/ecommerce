@@ -12,36 +12,34 @@ type Router struct {
 	engine          *gin.Engine
 	productHandler  *product.ProductHandlers
 	errorMiddleware *middleware.ErrorMiddleware
-	authMiddleware  *middleware.AuthMiddleware  // ← добавляем
+	authMiddleware  *middleware.AuthMiddleware
 }
 
 func NewRouter(
 	productHandler *product.ProductHandlers,
 	errorMiddleware *middleware.ErrorMiddleware,
-	authMiddleware *middleware.AuthMiddleware,  // ← добавляем
+	authMiddleware *middleware.AuthMiddleware,
 ) *Router {
 	engine := gin.Default()
 	return &Router{
 		engine:          engine,
 		productHandler:  productHandler,
 		errorMiddleware: errorMiddleware,
-		authMiddleware:  authMiddleware,  // ← добавляем
+		authMiddleware:  authMiddleware,
 	}
 }
 
 func (r *Router) SetupRoutes() {
 	api := r.engine.Group("/api/v1")
 
-	// Публичные маршруты (не требуют авторизации)
 	products := api.Group("/products")
 	{
 		products.GET("/", r.productHandler.ListProducts)
 		products.GET("/:id", r.productHandler.GetProduct)
 	}
 
-	// Защищённые маршруты (требуют авторизации)
 	authProducts := api.Group("/products")
-	authProducts.Use(r.authMiddleware.AuthRequired())  // ← middleware
+	authProducts.Use(r.authMiddleware.AuthRequired())
 	{
 		authProducts.POST("/", r.productHandler.CreateProduct)
 		authProducts.PUT("/:id", r.productHandler.UpdateProduct)

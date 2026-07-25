@@ -191,10 +191,10 @@ func (h *UserHandlers) GetProfile(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user_id":  user.Id,
-			"email":    user.Email,
-			"name":     user.Name,
-			"is_admin": user.IsAdmin,
+			"user_id": user.Id,
+			"email":   user.Email,
+			"name":    user.Name,
+			"role":    user.Role,
 		},
 	})
 }

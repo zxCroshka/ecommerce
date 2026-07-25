@@ -65,6 +65,8 @@
 - Если товара недостаточно — возвращать ошибку. Резервирование должно быть атомарным (использовать транзакцию в PostgreSQL).
 - При отмене заказа Order Service вызывает `ReleaseStock(product_id, quantity)` — остаток возвращается.
 
+
+
 ### gRPC (внутренний)
 - `GetProduct(product_id)` — получить данные товара.
 - `ReserveStock(product_id, quantity)` — зарезервировать остаток.
@@ -94,7 +96,7 @@
 - Для каждой позиции вызывает `ReserveStock` у Product Service. Если хотя бы один товар недоступен — весь заказ отклоняется, уже зарезервированные позиции освобождаются.
 - Заказ сохраняется в PostgreSQL со статусом `pending`.
 - После успешного сохранения публикуется событие `order.created` в Kafka с полями `order_id`, `user_id`, `items`, `total_price`.
-
+	
 ### Статусы заказа
 Заказ проходит строго по цепочке: `pending` → `confirmed` → `shipped` → `delivered`. Отмена (`cancelled`) возможна только из статусов `pending` и `confirmed`.
 

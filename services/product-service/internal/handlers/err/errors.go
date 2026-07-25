@@ -52,3 +52,6 @@ func NewNotFoundError(message string) *AppError {
 	}
 }
 
+func NewConflictError(message string) *AppError {
+	return &AppError{Status: 409, Code: "CONFLICT", Message: message}
+}

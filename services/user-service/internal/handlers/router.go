@@ -9,12 +9,13 @@ import (
 )
 
 type Router struct {
-	engine		  *gin.Engine
+	engine          *gin.Engine
 	authHandler     *auth.AuthHandlers
 	userHandler     *user.UserHandlers
 	authMiddleware  *middleware.AuthMiddleware
 	errorMiddleware *middleware.ErrorMiddleware
 }
+
 func (r *Router) GetEngine() *gin.Engine {
 	return r.engine
 }
@@ -27,7 +28,7 @@ func NewRouter(
 ) *Router {
 	engine := gin.Default()
 	return &Router{
-		engine: engine,
+		engine:          engine,
 		authHandler:     authHandler,
 		userHandler:     userHandler,
 		authMiddleware:  authMiddleware,
@@ -37,7 +38,6 @@ func NewRouter(
 
 func (r *Router) SetupRoutes() {
 	api := r.engine.Group("/api/v1")
-
 	auth := api.Group("/auth")
 	{
 		auth.POST("/register", r.authHandler.Register)
@@ -61,7 +61,7 @@ func (r *Router) SetupRoutes() {
 }
 
 func (r *Router) Run(addr string) error {
-	
+
 	r.engine.Use(r.errorMiddleware.ErrorHandler())
 
 	r.SetupRoutes()

@@ -46,7 +46,7 @@ func TestAuthHandlers_Register(t *testing.T) {
 				Name:     "Test User",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("Register", mock.Anything, "test@example.com", "password123", "Test User", false).
+				m.On("Register", mock.Anything, "test@example.com", "password123", "Test User").
 					Return(nil)
 			},
 			expectedStatus: http.StatusCreated,
@@ -63,7 +63,7 @@ func TestAuthHandlers_Register(t *testing.T) {
 				Name:     "",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("Register", mock.Anything, "test@example.com", "password123", "anonymous user", false).
+				m.On("Register", mock.Anything, "test@example.com", "password123", "anonymous user").
 					Return(nil)
 			},
 			expectedStatus: http.StatusCreated,
@@ -80,7 +80,7 @@ func TestAuthHandlers_Register(t *testing.T) {
 				Name:     "Test User",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("Register", mock.Anything, "existing@example.com", "password123", "Test User", false).
+				m.On("Register", mock.Anything, "existing@example.com", "password123", "Test User").
 					Return(customerrors.ErrDuplicateEmail)
 			},
 			expectedStatus: http.StatusConflict,

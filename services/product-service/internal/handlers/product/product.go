@@ -28,11 +28,11 @@ func New(log *slog.Logger, srv service.ProductServiceInterface) *ProductHandlers
 type CreateProductRequest struct {
 	Name        string   `json:"name" binding:"required"`
 	Description string   `json:"description" binding:"required"`
-	Price       int64    `json:"price" binding:"required,gt=0"`
-	Stock       int64    `json:"stock" binding:"required,gte=0"`
+	Price       int64    `json:"price" binding:"gte=0"`
+	Stock       int64    `json:"stock" binding:"gte=0"`
 	Category    string   `json:"category" binding:"required"`
 	Images      []string `json:"images" binding:"omitempty,dive,url"`
-	IsActive    bool     `json:"is_active"`
+	IsActive    *bool    `json:"is_active"`
 }
 
 func (h *ProductHandlers) CreateProduct(ctx *gin.Context) {
@@ -47,18 +47,21 @@ func (h *ProductHandlers) CreateProduct(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, exists := ctx.Get("isAdmin")
-	if !exists || !isAdmin.(bool) {
+	isAdmin := adminFromContext(ctx)
+	if !isAdmin {
 		log.Warn("unauthorized access attempt to create product")
 		_ = ctx.Error(errs.NewForbiddenError("only admins can create products"))
 		ctx.Abort()
 		return
 	}
 
-	productID, err := h.srv.CreateProduct(ctx, req.Name, req.Description, req.Price, req.Stock, req.Category, req.Images, req.IsActive, isAdmin.(bool))
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	productID, err := h.srv.CreateProduct(ctx, req.Name, req.Description, req.Price, req.Stock, req.Category, req.Images, isActive, isAdmin)
 	if err != nil {
-		log.Error("internal server error", "error", err)
-		_ = ctx.Error(errs.NewInternalServerError("failed to create product"))
+		handleServiceError(ctx, err, "failed to create product")
 		ctx.Abort()
 		return
 	}
@@ -84,9 +87,7 @@ func (h *ProductHandlers) GetProduct(ctx *gin.Context) {
 
 	// ИСПРАВЛЕНО: не требуем isAdmin для публичного эндпоинта
 	isAdmin := false
-	if adminVal, exists := ctx.Get("isAdmin"); exists {
-		isAdmin = adminVal.(bool)
-	}
+	isAdmin = adminFromContext(ctx)
 
 	product, err := h.srv.GetProduct(ctx, req.ProductID, isAdmin)
 	if err != nil {
@@ -106,13 +107,14 @@ func (h *ProductHandlers) GetProduct(ctx *gin.Context) {
 }
 
 type UpdateProductRequest struct {
-	ProductID   int64    `uri:"id" binding:"required,min=1"`
-	Name        *string  `json:"name" binding:"omitempty"`
-	Description *string  `json:"description" binding:"omitempty"`
-	Price       *int64   `json:"price" binding:"omitempty,gt=0"`
-	Stock       *int64   `json:"stock" binding:"omitempty,gte=0"`
-	Category    *string  `json:"category" binding:"omitempty"`
-	Images      []string `json:"images" binding:"omitempty,dive,url"`
+	ProductID   int64     `uri:"id" binding:"required,min=1"`
+	Name        *string   `json:"name" binding:"omitempty"`
+	Description *string   `json:"description" binding:"omitempty"`
+	Price       *int64    `json:"price" binding:"omitempty,gte=0"`
+	Stock       *int64    `json:"stock" binding:"omitempty,gte=0"`
+	Category    *string   `json:"category" binding:"omitempty"`
+	Images      *[]string `json:"images" binding:"omitempty,dive,url"`
+	IsActive    *bool     `json:"is_active"`
 }
 
 func (h *ProductHandlers) UpdateProduct(ctx *gin.Context) {
@@ -134,50 +136,32 @@ func (h *ProductHandlers) UpdateProduct(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, exists := ctx.Get("isAdmin")
-	if !exists || !isAdmin.(bool) {
+	isAdmin := adminFromContext(ctx)
+	if !isAdmin {
 		log.Warn("unauthorized access attempt to update product", "product_id", req.ProductID)
 		_ = ctx.Error(errs.NewForbiddenError("only admins can update products"))
 		ctx.Abort()
 		return
 	}
 
-	updates := make(map[string]any)
-	if req.Name != nil {
-		updates["name"] = *req.Name
-	}
-	if req.Description != nil {
-		updates["description"] = *req.Description
-	}
-	if req.Price != nil {
-		updates["price"] = *req.Price
-	}
-	if req.Stock != nil {
-		updates["stock"] = *req.Stock
-	}
-	if req.Category != nil {
-		updates["category"] = *req.Category
+	patch := domain.ProductPatch{
+		Name: req.Name, Description: req.Description, Price: req.Price, Stock: req.Stock,
+		Category: req.Category, IsActive: req.IsActive,
 	}
 	if req.Images != nil {
-		updates["images"] = req.Images
+		patch.Images = *req.Images
+		patch.ImagesSet = true
 	}
 
-	if len(updates) == 0 {
+	if patch.Empty() {
 		log.Warn("no fields to update", "product_id", req.ProductID)
 		_ = ctx.Error(errs.NewBadRequestError("no fields to update"))
 		ctx.Abort()
 		return
 	}
 
-	if err := h.srv.UpdateProductFields(ctx, req.ProductID, updates, isAdmin.(bool)); err != nil {
-		if errors.Is(err, customerrors.ErrProductNotFound) {
-			log.Warn("product not found", "product_id", req.ProductID)
-			_ = ctx.Error(errs.NewNotFoundError("product not found"))
-			ctx.Abort()
-			return
-		}
-		log.Error("internal server error", "error", err)
-		_ = ctx.Error(errs.NewInternalServerError("failed to update product"))
+	if err := h.srv.UpdateProductFields(ctx, req.ProductID, patch, isAdmin); err != nil {
+		handleServiceError(ctx, err, "failed to update product")
 		ctx.Abort()
 		return
 	}
@@ -201,15 +185,15 @@ func (h *ProductHandlers) DeleteProduct(ctx *gin.Context) {
 		return
 	}
 
-	isAdmin, exists := ctx.Get("isAdmin")
-	if !exists || !isAdmin.(bool) {
+	isAdmin := adminFromContext(ctx)
+	if !isAdmin {
 		log.Warn("unauthorized access attempt to delete product", "product_id", req.ProductID)
 		_ = ctx.Error(errs.NewForbiddenError("only admins can delete products"))
 		ctx.Abort()
 		return
 	}
 
-	if err := h.srv.SoftDelete(ctx, req.ProductID, isAdmin.(bool)); err != nil {
+	if err := h.srv.SoftDelete(ctx, req.ProductID, isAdmin); err != nil {
 		if errors.Is(err, customerrors.ErrProductNotFound) {
 			log.Warn("product not found", "product_id", req.ProductID)
 			_ = ctx.Error(errs.NewNotFoundError("product not found"))
@@ -257,9 +241,7 @@ func (h *ProductHandlers) ListProducts(ctx *gin.Context) {
 
 	// ИСПРАВЛЕНО: не требуем isAdmin для публичного эндпоинта
 	isAdmin := false
-	if adminVal, exists := ctx.Get("isAdmin"); exists {
-		isAdmin = adminVal.(bool)
-	}
+	isAdmin = adminFromContext(ctx)
 
 	products, total, err := h.srv.ListProducts(ctx, domain.ProductListRequest{
 		Filter: domain.ProductFilter{
@@ -303,8 +285,34 @@ func parseSort(sort string) domain.SortField {
 		return domain.SortByPrice
 	case "created_at_desc", "created_at_asc":
 		return domain.SortByCreatedAt
+	case "name_asc", "name_desc":
+		return domain.SortByName
 	default:
 		return domain.SortByCreatedAt
+	}
+}
+
+func adminFromContext(ctx *gin.Context) bool {
+	isAdmin, ok := ctx.Get("isAdmin")
+	if !ok {
+		return false
+	}
+	admin, ok := isAdmin.(bool)
+	return ok && admin
+}
+
+func handleServiceError(ctx *gin.Context, err error, fallback string) {
+	switch {
+	case errors.Is(err, customerrors.ErrInvalidProductData):
+		_ = ctx.Error(errs.NewBadRequestError(err.Error()))
+	case errors.Is(err, customerrors.ErrForbidden):
+		_ = ctx.Error(errs.NewForbiddenError("access denied"))
+	case errors.Is(err, customerrors.ErrProductNotFound):
+		_ = ctx.Error(errs.NewNotFoundError("product not found"))
+	case errors.Is(err, customerrors.ErrProductExists):
+		_ = ctx.Error(errs.NewConflictError("product already exists"))
+	default:
+		_ = ctx.Error(errs.NewInternalServerError(fallback))
 	}
 }
 

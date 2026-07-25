@@ -75,7 +75,7 @@ func TestUserRegisteredEvent_JSONTags(t *testing.T) {
 
 func TestEventRole(t *testing.T) {
 	expectedRole := "customer"
-	
+
 	event := UserRegisteredEvent{
 		UserID:    1,
 		Email:     "test@example.com",
@@ -171,7 +171,7 @@ func TestNewProducer(t *testing.T) {
 		// При пустых адресах продюсер создается (Kafka позволяет),
 		// но отправка сообщений будет失敗
 		producer, err := NewProducer([]string{})
-		
+
 		// В зависимости от реализации, может вернуть ошибку или nil
 		if err != nil {
 			t.Logf("NewProducer returned error: %v", err)
@@ -182,7 +182,7 @@ func TestNewProducer(t *testing.T) {
 		}
 		// Тест проходит в любом случае
 	})
-	
+
 	t.Run("valid addresses", func(t *testing.T) {
 		producer, err := NewProducer([]string{"localhost:9092"})
 		if err != nil {

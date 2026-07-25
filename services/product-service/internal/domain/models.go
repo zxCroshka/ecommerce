@@ -27,7 +27,7 @@ func (p *Product) ToProto() *productservicev1.Product {
 		Name:        p.Name,
 		Description: p.Description,
 		Price:       p.Price,
-		Stock:       p.Stock, // Убедитесь, что в proto поле называется stock, а не stok
+		Stock:       p.Stock,
 		Category:    p.Category,
 		Images:      p.Images,
 		IsActive:    p.IsActive,
@@ -53,8 +53,27 @@ type SortField string
 
 const (
 	SortByPrice     SortField = "price"
+	SortByName      SortField = "name"
 	SortByCreatedAt SortField = "created_at"
 )
+
+// ProductPatch is the only set of fields that may be changed by the API.
+// Using a typed patch prevents request data from becoming SQL identifiers.
+type ProductPatch struct {
+	Name        *string
+	Description *string
+	Price       *int64
+	Stock       *int64
+	Category    *string
+	Images      []string
+	ImagesSet   bool
+	IsActive    *bool
+}
+
+func (p ProductPatch) Empty() bool {
+	return p.Name == nil && p.Description == nil && p.Price == nil && p.Stock == nil &&
+		p.Category == nil && !p.ImagesSet && p.IsActive == nil
+}
 
 type SortOrder string
 

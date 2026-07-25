@@ -17,9 +17,9 @@ type MockUserService struct {
 	mock.Mock
 }
 
-func (m *MockUserService) ValidateToken(ctx context.Context, token string) (int64, bool, error) {
+func (m *MockUserService) ValidateToken(ctx context.Context, token string) (int64, domain.Role, error) {
 	args := m.Called(ctx, token)
-	return args.Get(0).(int64), args.Bool(1), args.Error(2)
+	return args.Get(0).(int64), args.Get(1).(domain.Role), args.Error(2)
 }
 
 func (m *MockUserService) GetUser(ctx context.Context, userID int64) (domain.User, error) {
@@ -42,9 +42,9 @@ func TestValidateToken(t *testing.T) {
 			req:  &userservicrev1.ValidateTokenRequest{Token: "valid-token"},
 			setupMock: func(m *MockUserService) {
 				m.On("ValidateToken", mock.Anything, "valid-token").
-					Return(int64(123), true, nil)
+					Return(int64(123), domain.RoleAdmin, nil)
 			},
-			expectedRes: &userservicrev1.ValidateTokenResponse{UserId: 123, IsAdmin: true},
+			expectedRes: &userservicrev1.ValidateTokenResponse{UserId: 123, Role: "admin"},
 			expectedErr: nil,
 		},
 		{
@@ -59,10 +59,10 @@ func TestValidateToken(t *testing.T) {
 			req:  &userservicrev1.ValidateTokenRequest{Token: "blacklisted"},
 			setupMock: func(m *MockUserService) {
 				m.On("ValidateToken", mock.Anything, "blacklisted").
-					Return(int64(0), false, customerrors.ErrTokenBlacklisted)
+					Return(int64(0), domain.Role(""), customerrors.ErrTokenBlacklisted)
 			},
 			expectedRes: nil,
-			expectedErr: status.Error(codes.PermissionDenied, "token is black listed"),
+			expectedErr: status.Error(codes.Unauthenticated, "token is blacklisted"),
 		},
 	}
 
@@ -104,16 +104,16 @@ func TestGetUser(t *testing.T) {
 			setupMock: func(m *MockUserService) {
 				m.On("GetUser", mock.Anything, int64(123)).
 					Return(domain.User{
-						Id:      123,
-						Email:   "test@example.com",
-						Name:    "Test User",
-						IsAdmin: false,
+						Id:    123,
+						Email: "test@example.com",
+						Name:  "Test User",
+						Role:  domain.RoleCustomer,
 					}, nil)
 			},
 			expectedRes: &userservicrev1.GetUserResponse{
-				Email:   "test@example.com",
-				Name:    "Test User",
-				IsAdmin: false,
+				Email: "test@example.com",
+				Name:  "Test User",
+				Role:  "customer",
 			},
 			expectedErr: nil,
 		},

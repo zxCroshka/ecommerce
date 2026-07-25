@@ -1,4 +1,4 @@
-.PHONY: lint lint-fix migrate-create-userservice migrate-create-productservice test test-unit test-integration test-coverage build run lint-errcheck migrate-up test-grpc test-http generate-proto-userservice generate-proto-productservice run-productservice run-userservice build-productservice build-userservice migrate-up-userservice migrate-down-userservice migrate-up-productservice migrate-down-productservice test-postgres run-only
+.PHONY: lint lint-fix migrate-create-userservice migrate-create-productservice test test-unit test-integration test-coverage build run lint-errcheck migrate-up test-grpc test-http generate-proto-userservice generate-proto-productservice generate-proto-cartservice run-productservice run-userservice build-productservice build-userservice migrate-up-userservice migrate-down-userservice migrate-up-productservice migrate-down-productservice test-postgres run-only
 
 lint:
 	golangci-lint run ./... --build-tags=integration
@@ -59,6 +59,18 @@ generate-proto-productservice:
 		--go_opt=paths=source_relative \
 		--go-grpc_out=./shared/productservice/gen/go \
 		--go-grpc_opt=paths=source_relative
+
+
+
+generate-proto-cartservice:
+	protoc -I ./shared/cartservice/proto \
+		./shared/cartservice/proto/cartservice.proto \
+		--go_out=./shared/cartservice/gen/go \
+		--go_opt=paths=source_relative \
+		--go-grpc_out=./shared/cartservice/gen/go \
+		--go-grpc_opt=paths=source_relative
+
+
 
 build-userservice:
 	cd services/user-service && go build -o bin/user-service cmd/main.go

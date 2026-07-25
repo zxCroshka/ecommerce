@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/google/uuid"
 )
 
 const (
@@ -20,6 +21,13 @@ var (
 	errUnknownType        = errors.New("unknown event type")
 )
 
+type Event[T any] struct {
+	EventID    string    `json:"event_id"`
+	EventType  string    `json:"event_type"`
+	Version    int       `json:"version"`
+	OccurredAt time.Time `json:"occurred_at"`
+	Payload    T         `json:"payload"`
+}
 type UserRegisteredEvent struct {
 	UserID    int64  `json:"user_id"`
 	Email     string `json:"email"`
@@ -44,12 +52,18 @@ func NewProducer(address []string) (*Producer, error) {
 }
 
 func (p *Producer) Produce(userID int64, email, name string) error {
-	event := UserRegisteredEvent{
-		UserID:    userID,
-		Email:     email,
-		Name:      name,
-		Role:      "customer",
-		Timestamp: time.Now().Unix(),
+	event := Event[UserRegisteredEvent]{
+		EventID:    uuid.New().String(),
+		EventType:  "user.registered",
+		Version:    1,
+		OccurredAt: time.Now(),
+		Payload: UserRegisteredEvent{
+			UserID:    userID,
+			Email:     email,
+			Name:      name,
+			Role:      "customer",
+			Timestamp: time.Now().Unix(),
+		},
 	}
 
 	value, err := json.Marshal(event)

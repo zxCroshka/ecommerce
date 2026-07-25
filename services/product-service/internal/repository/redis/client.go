@@ -11,17 +11,19 @@ import (
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/customerrors"
 )
 
-const TTL = 5 * time.Minute
-
 type Client struct {
-	client *redis.Client
+	client          *redis.Client
+	productTTL      time.Duration
+	productsListTTL time.Duration
 }
 
 type Config struct {
-	Host     string
-	Port     int
-	Password string
-	DB       int
+	Host            string
+	Port            int
+	Password        string
+	DB              int
+	ProductTTL      time.Duration
+	ProductsListTTL time.Duration
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -39,7 +41,13 @@ func NewClient(cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("failed to connect to redis: %w", err)
 	}
 
-	return &Client{client: client}, nil
+	if cfg.ProductTTL <= 0 {
+		cfg.ProductTTL = 5 * time.Minute
+	}
+	if cfg.ProductsListTTL <= 0 {
+		cfg.ProductsListTTL = 5 * time.Minute
+	}
+	return &Client{client: client, productTTL: cfg.ProductTTL, productsListTTL: cfg.ProductsListTTL}, nil
 }
 
 func (c *Client) Close() error {
@@ -54,7 +62,7 @@ func (c *Client) SetListProductsCache(ctx context.Context, key string, products 
 	if err != nil {
 		return fmt.Errorf("%s: failed to marshal %w", op, customerrors.ErrMarshal)
 	}
-	if err := c.client.Set(ctx, key, data, TTL); err != nil {
+	if err := c.client.Set(ctx, key, data, c.productsListTTL).Err(); err != nil {
 		return fmt.Errorf("%s: failed to set cache %w", op, customerrors.ErrSetCache)
 	}
 	return nil
@@ -90,7 +98,7 @@ func (c *Client) InvalidateProductsCache(ctx context.Context, key string) error 
 func (c *Client) InvalidateProductsCacheByPattern(ctx context.Context, pattern string) error {
 	const op = "storage.redis.InvalidateProductsCacheByPattern"
 
-	keys, err := c.client.Keys(ctx, pattern).Result()
+	keys, err := c.scanKeys(ctx, pattern)
 	if err != nil {
 		return fmt.Errorf("%s: failed to get keys: %w", op, err)
 	}
@@ -112,7 +120,7 @@ func (c *Client) SetProductCache(ctx context.Context, productID int64, product *
 	if err != nil {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrMarshal)
 	}
-	if err := c.client.Set(ctx, key, data, TTL).Err(); err != nil {
+	if err := c.client.Set(ctx, key, data, c.productTTL).Err(); err != nil {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrSetCache)
 	}
 
@@ -150,17 +158,16 @@ func (c *Client) InvalidateProductCache(ctx context.Context, productID int64) er
 	return nil
 }
 
-
 func (c *Client) InvalidateAllProductCache(ctx context.Context) error {
 	const op = "storage.redis.InvalidateAllProductCache"
 
 	pattern := "products:*"
-	keys, err := c.client.Keys(ctx, pattern).Result()
+	keys, err := c.scanKeys(ctx, pattern)
 	if err != nil {
 		return fmt.Errorf("%s: failed to get keys: %w", op, err)
 	}
 
-	productKeys, err := c.client.Keys(ctx, "product:*").Result()
+	productKeys, err := c.scanKeys(ctx, "product:*")
 	if err != nil {
 		return fmt.Errorf("%s: failed to get product keys: %w", op, err)
 	}
@@ -175,7 +182,21 @@ func (c *Client) InvalidateAllProductCache(ctx context.Context) error {
 	return nil
 }
 
-
+func (c *Client) scanKeys(ctx context.Context, pattern string) ([]string, error) {
+	var cursor uint64
+	var result []string
+	for {
+		keys, next, err := c.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, keys...)
+		cursor = next
+		if cursor == 0 {
+			return result, nil
+		}
+	}
+}
 
 func (c *Client) BuildListCacheKey(filter domain.ProductFilter, sort domain.SortField, order domain.SortOrder, limit, offset int) string {
 	key := "products:list"

@@ -1,0 +1,25 @@
+service:
+  name: "ecommerce-service-cart"
+  environment: "local"
+
+grpc:
+  port: 9092
+
+product_service:
+  address: "127.0.0.1:9091"
+  retry_count: 3
+  timeout: "2s"
+
+cart:
+  ttl: "168h"
+  max_product_quantity: 99
+
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""
+  db: 2
+
+logging:
+  level: "debug"
+  format: "text"

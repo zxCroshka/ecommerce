@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
 )
 
 func TestNewJWTService(t *testing.T) {
@@ -31,35 +32,35 @@ func TestJWTService_GenerateTokenPair(t *testing.T) {
 		name        string
 		userID      int64
 		email       string
-		isAdmin     bool
+		role        domain.Role
 		shouldError bool
 	}{
 		{
 			name:        "success - generate token pair for customer",
 			userID:      1,
 			email:       "customer@example.com",
-			isAdmin:     false,
+			role:        domain.RoleCustomer,
 			shouldError: false,
 		},
 		{
 			name:        "success - generate token pair for admin",
 			userID:      2,
 			email:       "admin@example.com",
-			isAdmin:     true,
+			role:        domain.RoleAdmin,
 			shouldError: false,
 		},
 		{
 			name:        "success - generate with empty email",
 			userID:      3,
 			email:       "",
-			isAdmin:     false,
+			role:        domain.RoleCustomer,
 			shouldError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokenPair, refreshTokenID, err := svc.GenerateTokenPair(tt.userID, tt.email, tt.isAdmin)
+			tokenPair, refreshTokenID, err := svc.GenerateTokenPair(tt.userID, tt.email, tt.role)
 
 			if tt.shouldError {
 				assert.Error(t, err)
@@ -88,9 +89,9 @@ func TestJWTService_ValidateToken_ValidTokens(t *testing.T) {
 	t.Run("validate access token", func(t *testing.T) {
 		userID := int64(123)
 		email := "test@example.com"
-		isAdmin := false
+		role := domain.RoleCustomer
 
-		tokenPair, _, err := svc.GenerateTokenPair(userID, email, isAdmin)
+		tokenPair, _, err := svc.GenerateTokenPair(userID, email, role)
 		require.NoError(t, err)
 
 		claims, err := svc.ValidateToken(tokenPair.AccessToken)
@@ -98,7 +99,8 @@ func TestJWTService_ValidateToken_ValidTokens(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, userID, claims.UserID)
 		assert.Equal(t, email, claims.Email)
-		assert.Equal(t, isAdmin, claims.IsAdmin)
+		assert.Equal(t, role, claims.Role)
+		assert.Equal(t, AccessTokenType, claims.TokenType)
 		assert.NotEmpty(t, claims.ID)
 		assert.NotZero(t, claims.IssuedAt)
 		assert.NotZero(t, claims.ExpiresAt)
@@ -107,9 +109,9 @@ func TestJWTService_ValidateToken_ValidTokens(t *testing.T) {
 	t.Run("validate refresh token", func(t *testing.T) {
 		userID := int64(456)
 		email := "refresh@example.com"
-		isAdmin := true
+		role := domain.RoleAdmin
 
-		tokenPair, _, err := svc.GenerateTokenPair(userID, email, isAdmin)
+		tokenPair, _, err := svc.GenerateTokenPair(userID, email, role)
 		require.NoError(t, err)
 
 		claims, err := svc.ValidateToken(tokenPair.RefreshToken)
@@ -117,9 +119,30 @@ func TestJWTService_ValidateToken_ValidTokens(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, userID, claims.UserID)
 		assert.Equal(t, email, claims.Email)
-		assert.Equal(t, isAdmin, claims.IsAdmin)
+		assert.Equal(t, role, claims.Role)
+		assert.Equal(t, RefreshTokenType, claims.TokenType)
 		assert.NotEmpty(t, claims.ID)
 	})
+}
+
+func TestJWTService_RejectsWrongTokenType(t *testing.T) {
+	svc := NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
+	pair, _, err := svc.GenerateTokenPair(1, "test@example.com", domain.RoleCustomer)
+	require.NoError(t, err)
+
+	claims, err := svc.ValidateAccessToken(pair.AccessToken)
+	require.NoError(t, err)
+	assert.Equal(t, AccessTokenType, claims.TokenType)
+
+	claims, err = svc.ValidateRefreshToken(pair.RefreshToken)
+	require.NoError(t, err)
+	assert.Equal(t, RefreshTokenType, claims.TokenType)
+
+	_, err = svc.ValidateAccessToken(pair.RefreshToken)
+	assert.Error(t, err)
+
+	_, err = svc.ValidateRefreshToken(pair.AccessToken)
+	assert.Error(t, err)
 }
 
 func TestJWTService_ValidateToken_ExpiredToken(t *testing.T) {
@@ -129,7 +152,7 @@ func TestJWTService_ValidateToken_ExpiredToken(t *testing.T) {
 	refreshTTL := 1 * time.Second
 	svc := NewJWTService(secret, accessTTL, refreshTTL)
 
-	tokenPair, _, err := svc.GenerateTokenPair(1, "test@example.com", false)
+	tokenPair, _, err := svc.GenerateTokenPair(1, "test@example.com", domain.RoleCustomer)
 	require.NoError(t, err)
 
 	// Сразу после создания токен должен быть валиден
@@ -200,7 +223,7 @@ func TestJWTService_ValidateToken_WrongSecret(t *testing.T) {
 	svc1 := NewJWTService("secret-1", 15*time.Minute, 168*time.Hour)
 
 	// Генерируем токен
-	tokenPair, _, err := svc1.GenerateTokenPair(1, "test@example.com", false)
+	tokenPair, _, err := svc1.GenerateTokenPair(1, "test@example.com", domain.RoleCustomer)
 	require.NoError(t, err)
 
 	// Создаем другой сервис с другим секретом
@@ -229,9 +252,9 @@ func TestJWTService_TokenClaimsContent(t *testing.T) {
 
 	userID := int64(12345)
 	email := "full-test@example.com"
-	isAdmin := true
+	role := domain.RoleAdmin
 
-	tokenPair, refreshTokenID, err := svc.GenerateTokenPair(userID, email, isAdmin)
+	tokenPair, refreshTokenID, err := svc.GenerateTokenPair(userID, email, role)
 	require.NoError(t, err)
 
 	// Проверяем claims access токена
@@ -240,7 +263,7 @@ func TestJWTService_TokenClaimsContent(t *testing.T) {
 
 	assert.Equal(t, userID, accessClaims.UserID)
 	assert.Equal(t, email, accessClaims.Email)
-	assert.Equal(t, isAdmin, accessClaims.IsAdmin)
+	assert.Equal(t, role, accessClaims.Role)
 	assert.NotEmpty(t, accessClaims.ID)
 	assert.NotZero(t, accessClaims.IssuedAt)
 	assert.NotZero(t, accessClaims.ExpiresAt)
@@ -254,7 +277,7 @@ func TestJWTService_TokenClaimsContent(t *testing.T) {
 
 	assert.Equal(t, userID, refreshClaims.UserID)
 	assert.Equal(t, email, refreshClaims.Email)
-	assert.Equal(t, isAdmin, refreshClaims.IsAdmin)
+	assert.Equal(t, role, refreshClaims.Role)
 	assert.Equal(t, refreshTokenID, refreshClaims.ID)
 	assert.NotZero(t, refreshClaims.IssuedAt)
 	assert.NotZero(t, refreshClaims.ExpiresAt)
@@ -272,10 +295,10 @@ func TestJWTService_DifferentUsersGetDifferentTokens(t *testing.T) {
 	svc := NewJWTService(secret, accessTTL, refreshTTL)
 
 	// Генерируем токены для двух разных пользователей
-	tokenPair1, _, err := svc.GenerateTokenPair(1, "user1@example.com", false)
+	tokenPair1, _, err := svc.GenerateTokenPair(1, "user1@example.com", domain.RoleCustomer)
 	require.NoError(t, err)
 
-	tokenPair2, _, err := svc.GenerateTokenPair(2, "user2@example.com", true)
+	tokenPair2, _, err := svc.GenerateTokenPair(2, "user2@example.com", domain.RoleAdmin)
 	require.NoError(t, err)
 
 	// Токены должны быть разными
@@ -287,13 +310,13 @@ func TestJWTService_DifferentUsersGetDifferentTokens(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), claims1.UserID)
 	assert.Equal(t, "user1@example.com", claims1.Email)
-	assert.False(t, claims1.IsAdmin)
+	assert.Equal(t, domain.RoleCustomer, claims1.Role)
 
 	claims2, err := svc.ValidateToken(tokenPair2.AccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), claims2.UserID)
 	assert.Equal(t, "user2@example.com", claims2.Email)
-	assert.True(t, claims2.IsAdmin)
+	assert.Equal(t, domain.RoleAdmin, claims2.Role)
 }
 
 func TestJWTService_EachTokenHasUniqueID(t *testing.T) {
@@ -306,7 +329,7 @@ func TestJWTService_EachTokenHasUniqueID(t *testing.T) {
 	ids := make(map[string]bool)
 
 	for i := 0; i < 10; i++ {
-		_, refreshTokenID, err := svc.GenerateTokenPair(int64(i), "test@example.com", false)
+		_, refreshTokenID, err := svc.GenerateTokenPair(int64(i), "test@example.com", domain.RoleCustomer)
 		require.NoError(t, err)
 
 		// Проверяем, что ID уникальный
@@ -321,7 +344,7 @@ func TestJWTService_TokenIDInClaims(t *testing.T) {
 	refreshTTL := 168 * time.Hour
 	svc := NewJWTService(secret, accessTTL, refreshTTL)
 
-	tokenPair, refreshTokenID, err := svc.GenerateTokenPair(1, "test@example.com", false)
+	tokenPair, refreshTokenID, err := svc.GenerateTokenPair(1, "test@example.com", domain.RoleCustomer)
 	require.NoError(t, err)
 
 	// Проверяем, что ID сохранен в claims refresh токена
@@ -342,7 +365,7 @@ func BenchmarkGenerateTokenPair(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, err := svc.GenerateTokenPair(1, "bench@example.com", false)
+		_, _, err := svc.GenerateTokenPair(1, "bench@example.com", domain.RoleCustomer)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -351,7 +374,7 @@ func BenchmarkGenerateTokenPair(b *testing.B) {
 
 func BenchmarkValidateToken(b *testing.B) {
 	svc := NewJWTService("bench-secret", 15*time.Minute, 168*time.Hour)
-	tokenPair, _, err := svc.GenerateTokenPair(1, "bench@example.com", false)
+	tokenPair, _, err := svc.GenerateTokenPair(1, "bench@example.com", domain.RoleCustomer)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -370,12 +393,12 @@ func TestJWTService_ValidateToken_TableDriven(t *testing.T) {
 	svc := NewJWTService("test-secret", 15*time.Minute, 168*time.Hour)
 
 	// Генерируем валидный токен
-	validTokenPair, _, err := svc.GenerateTokenPair(1, "test@example.com", false)
+	validTokenPair, _, err := svc.GenerateTokenPair(1, "test@example.com", domain.RoleCustomer)
 	require.NoError(t, err)
 
 	// Создаем токен с истекшим сроком
 	expiredSvc := NewJWTService("test-secret", -1*time.Minute, 168*time.Hour)
-	expiredTokenPair, _, err := expiredSvc.GenerateTokenPair(1, "test@example.com", false)
+	expiredTokenPair, _, err := expiredSvc.GenerateTokenPair(1, "test@example.com", domain.RoleCustomer)
 	require.NoError(t, err)
 
 	tests := []struct {

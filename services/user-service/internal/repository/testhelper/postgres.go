@@ -98,7 +98,7 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			email VARCHAR(255) UNIQUE NOT NULL,
 			password_hash BYTEA NOT NULL,
 			name VARCHAR(255) NOT NULL,
-			is_admin BOOLEAN DEFAULT FALSE,
+			role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('customer', 'admin')),
 			created_at TIMESTAMP DEFAULT NOW()
 		)
 	`)
@@ -146,7 +146,7 @@ func SetupTestPostgresExisting(t *testing.T) *TestDB {
 
 	t.Cleanup(func() {
 		// Очищаем тестовую БД после тестов
-		_,_ =pool.Exec(ctx, `DROP SCHEMA userservice CASCADE`)
+		_, _ = pool.Exec(ctx, `DROP SCHEMA userservice CASCADE`)
 		pool.Close()
 	})
 

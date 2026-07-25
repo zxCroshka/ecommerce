@@ -6,6 +6,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
 )
 
 type JWTService struct {
@@ -14,10 +15,18 @@ type JWTService struct {
 	refreshTTL time.Duration
 }
 
+type TokenType string
+
+const (
+	AccessTokenType  TokenType = "access"
+	RefreshTokenType TokenType = "refresh"
+)
+
 type TokenClaims struct {
-	UserID int64  `json:"user_id"`
-	Email string `json:"email"`
-	IsAdmin   bool `json:"is_admin"`
+	UserID    int64       `json:"user_id"`
+	Email     string      `json:"email"`
+	Role      domain.Role `json:"role"`
+	TokenType TokenType   `json:"token_type"`
 	jwt.RegisteredClaims
 }
 
@@ -34,12 +43,13 @@ func NewJWTService(secretKey string, accessTTL, refreshTTL time.Duration) *JWTSe
 	}
 }
 
-func (s *JWTService) GenerateTokenPair(userID int64,email string, isAdmin bool) (*TokenPair, string, error) {
+func (s *JWTService) GenerateTokenPair(userID int64, email string, role domain.Role) (*TokenPair, string, error) {
 	accessTokenID := uuid.New().String()
 	accessClaims := TokenClaims{
-		UserID: userID,
-		IsAdmin:   isAdmin,
-		Email: email,
+		UserID:    userID,
+		Role:      role,
+		Email:     email,
+		TokenType: AccessTokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        accessTokenID,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.accessTTL)),
@@ -55,9 +65,10 @@ func (s *JWTService) GenerateTokenPair(userID int64,email string, isAdmin bool) 
 
 	refreshTokenID := uuid.New().String()
 	refreshClaims := TokenClaims{
-		UserID: userID,
-		Email: email,
-		IsAdmin:   isAdmin,
+		UserID:    userID,
+		Email:     email,
+		Role:      role,
+		TokenType: RefreshTokenType,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        refreshTokenID,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.refreshTTL)),
@@ -78,12 +89,14 @@ func (s *JWTService) GenerateTokenPair(userID int64,email string, isAdmin bool) 
 }
 
 func (s *JWTService) ValidateToken(tokenString string) (*TokenClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return s.secretKey, nil
-	})
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&TokenClaims{},
+		func(token *jwt.Token) (interface{}, error) {
+			return s.secretKey, nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse token: %w", err)
@@ -97,6 +110,34 @@ func (s *JWTService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	return claims, nil
 }
 
-func (s *JWTService) GetRefreshTTL() time.Duration{
+func (s *JWTService) GetRefreshTTL() time.Duration {
 	return s.refreshTTL
+}
+
+func (s *JWTService) ValidateAccessToken(token string) (*TokenClaims, error) {
+	return s.validateTokenType(token, AccessTokenType)
+}
+
+func (s *JWTService) ValidateRefreshToken(token string) (*TokenClaims, error) {
+	return s.validateTokenType(token, RefreshTokenType)
+}
+
+func (s *JWTService) validateTokenType(
+	tokenString string,
+	expectedType TokenType,
+) (*TokenClaims, error) {
+	claims, err := s.ValidateToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+
+	if claims.TokenType != expectedType {
+		return nil, fmt.Errorf(
+			"unexpected token type: expected %q, got %q",
+			expectedType,
+			claims.TokenType,
+		)
+	}
+
+	return claims, nil
 }

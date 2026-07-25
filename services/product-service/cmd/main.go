@@ -39,7 +39,6 @@ func main() {
 	log.Info(
 		"starting application",
 		slog.String("env", cfg.Service.Environment),
-		slog.Any("cfg", cfg),
 	)
 	application := app.New(
 		context.Background(),
@@ -53,6 +52,8 @@ func main() {
 		cfg.Redis.Port,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
+		cfg.Redis.TTL.ProductCache,
+		cfg.Redis.TTL.ProductsListCache,
 		cfg.Jwt.Secret,
 	)
 	go application.GRPCSrv.MustRun()

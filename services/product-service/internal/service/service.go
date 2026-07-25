@@ -14,7 +14,7 @@ import (
 type ProductServiceInterface interface {
 	CreateProduct(ctx context.Context, name, description string, price, stock int64, category string, images []string, isActive, isAdmin bool) (int64, error)
 	GetProduct(ctx context.Context, productID int64, isAdmin bool) (*domain.Product, error)
-	UpdateProductFields(ctx context.Context, productID int64, fields map[string]any, isAdmin bool) error
+	UpdateProductFields(ctx context.Context, productID int64, patch domain.ProductPatch, isAdmin bool) error
 	SoftDelete(ctx context.Context, productID int64, isAdmin bool) error
 	ListProducts(ctx context.Context, req domain.ProductListRequest, isAdmin bool) ([]*domain.Product, int64, error)
 }
@@ -38,13 +38,13 @@ type ProductManager interface {
 	UpdateProductFields(
 		ctx context.Context,
 		productID int64,
-		fields map[string]any,
+		patch domain.ProductPatch,
 	) error
 	ListProducts(ctx context.Context, req domain.ProductListRequest) ([]*domain.Product, int64, error)
 	SoftDelete(ctx context.Context, productID int64) error
 	GetProduct(ctx context.Context, productID int64) (*domain.Product, error)
-	ReserveStockTX(ctx context.Context, productID int64, quantity int64) error
-	ReleaseStockTX(ctx context.Context, productID int64, quantity int64) error
+	ReserveStockTX(ctx context.Context, productID int64, quantity int64) (int64, error)
+	ReleaseStockTX(ctx context.Context, productID int64, quantity int64) (int64, error)
 }
 
 type CacheManager interface {
@@ -133,7 +133,7 @@ func (s *ProductService) CreateProduct(
 func (s *ProductService) UpdateProductFields(
 	ctx context.Context,
 	productID int64,
-	fields map[string]any,
+	patch domain.ProductPatch,
 	isAdmin bool,
 ) error {
 	const op = "service.UpdateProductFields"
@@ -144,8 +144,8 @@ func (s *ProductService) UpdateProductFields(
 		return fmt.Errorf("%s: %w", op, customerrors.ErrForbidden)
 	}
 
-	if len(fields) == 0 {
-		return fmt.Errorf("%s: no fields to update", op)
+	if patch.Empty() {
+		return fmt.Errorf("%s: %w: no fields to update", op, customerrors.ErrInvalidProductData)
 	}
 
 	oldProduct, err := s.productManager.GetProduct(ctx, productID)
@@ -158,55 +158,53 @@ func (s *ProductService) UpdateProductFields(
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	if name, ok := fields["name"].(string); ok {
-		if err := s.validateProductName(name); err != nil {
+	if patch.Name != nil {
+		if err := s.validateProductName(*patch.Name); err != nil {
 			log.Warn("validation failed", "error", err)
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	if price, ok := fields["price"].(int64); ok {
-		if err := s.validatePrice(price); err != nil {
+	if patch.Price != nil {
+		if err := s.validatePrice(*patch.Price); err != nil {
 			log.Warn("validation failed", "error", err)
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	if stock, ok := fields["stock"].(int64); ok {
-		if err := s.validateStock(stock); err != nil {
+	if patch.Stock != nil {
+		if err := s.validateStock(*patch.Stock); err != nil {
 			log.Warn("validation failed", "error", err)
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	if category, ok := fields["category"].(string); ok {
-		if err := s.validateCategory(category); err != nil {
+	if patch.Category != nil {
+		if err := s.validateCategory(*patch.Category); err != nil {
 			log.Warn("validation failed", "error", err)
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
-	if images, ok := fields["images"].([]string); ok {
-		if err := s.validateImages(images); err != nil {
+	if patch.ImagesSet {
+		if err := s.validateImages(patch.Images); err != nil {
 			log.Warn("validation failed", "error", err)
 			return fmt.Errorf("%s: %w", op, err)
 		}
 	}
 
-	fields["updated_at"] = time.Now()
-
-	if err := s.productManager.UpdateProductFields(ctx, productID, fields); err != nil {
+	if err := s.productManager.UpdateProductFields(ctx, productID, patch); err != nil {
 		log.Error("failed to update product fields", "error", err)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
 	changes := make(map[string]any)
-	if newPrice, ok := fields["price"]; ok {
+	if patch.Price != nil {
 		changes["old_price"] = oldProduct.Price
-		changes["new_price"] = newPrice
+		changes["new_price"] = *patch.Price
 	}
-	if newStock, ok := fields["stock"]; ok {
+	if patch.Stock != nil {
 		changes["old_stock"] = oldProduct.Stock
-		changes["new_stock"] = newStock
+		changes["new_stock"] = *patch.Stock
 	}
-	if isActive, ok := fields["is_active"]; ok {
-		changes["is_active"] = isActive
+	if patch.IsActive != nil {
+		changes["is_active"] = *patch.IsActive
 	}
 
 	go func() {
@@ -359,25 +357,14 @@ func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quan
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	oldProduct, err := s.productManager.GetProduct(ctx, productID)
+	newStock, err := s.productManager.ReserveStockTX(ctx, productID, quantity)
 	if err != nil {
-		if errors.Is(err, customerrors.ErrProductNotFound) {
-			log.Warn("product not found")
-			return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
-		}
-		log.Error("failed to get product", "error", err)
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	if !oldProduct.IsActive {
-		log.Warn("inactive product cannot be reserved")
-		return fmt.Errorf("%s: product is inactive", op)
-	}
-
-	if err := s.productManager.ReserveStockTX(ctx, productID, quantity); err != nil {
 		if errors.Is(err, customerrors.ErrInsufficientStock) {
-			log.Warn("insufficient stock", "available", oldProduct.Stock, "requested", quantity)
+			log.Warn("insufficient stock", "requested", quantity)
 			return fmt.Errorf("%s: %w", op, customerrors.ErrInsufficientStock)
+		}
+		if errors.Is(err, customerrors.ErrProductInactive) {
+			return fmt.Errorf("%s: %w", op, customerrors.ErrProductInactive)
 		}
 		if errors.Is(err, customerrors.ErrProductNotFound) {
 			log.Warn("product not found")
@@ -388,14 +375,14 @@ func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quan
 	}
 
 	go func() {
-		if err := s.cacheManager.InvalidateProductCache(context.Background(), productID); err != nil {
-			s.log.Error("failed to invalidate product cache", "error", err)
+		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
+			s.log.Error("failed to invalidate product caches", "error", err)
 		}
 	}()
 
 	go func() {
 		changes := map[string]any{
-			"stock":             oldProduct.Stock - quantity,
+			"stock":             newStock,
 			"reserved_quantity": quantity,
 			"operation":         "reserve",
 		}
@@ -404,7 +391,7 @@ func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quan
 		}
 	}()
 
-	log.Info("stock reserved successfully", "old_stock", oldProduct.Stock, "new_stock", oldProduct.Stock-quantity)
+	log.Info("stock reserved successfully", "new_stock", newStock)
 	return nil
 }
 
@@ -417,17 +404,8 @@ func (s *ProductService) ReleaseStock(ctx context.Context, productID int64, quan
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	oldProduct, err := s.productManager.GetProduct(ctx, productID)
+	newStock, err := s.productManager.ReleaseStockTX(ctx, productID, quantity)
 	if err != nil {
-		if errors.Is(err, customerrors.ErrProductNotFound) {
-			log.Warn("product not found")
-			return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
-		}
-		log.Error("failed to get product", "error", err)
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	if err := s.productManager.ReleaseStockTX(ctx, productID, quantity); err != nil {
 		if errors.Is(err, customerrors.ErrProductNotFound) {
 			log.Warn("product not found")
 			return fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
@@ -437,14 +415,14 @@ func (s *ProductService) ReleaseStock(ctx context.Context, productID int64, quan
 	}
 
 	go func() {
-		if err := s.cacheManager.InvalidateProductCache(context.Background(), productID); err != nil {
-			s.log.Error("failed to invalidate product cache", "error", err)
+		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
+			s.log.Error("failed to invalidate product caches", "error", err)
 		}
 	}()
 
 	go func() {
 		changes := map[string]any{
-			"stock":             oldProduct.Stock + quantity,
+			"stock":             newStock,
 			"released_quantity": quantity,
 			"operation":         "release",
 		}
@@ -452,6 +430,6 @@ func (s *ProductService) ReleaseStock(ctx context.Context, productID int64, quan
 			s.log.Error("failed to send kafka event for stock release", "error", err)
 		}
 	}()
-	log.Info("stock released successfully", "old_stock", oldProduct.Stock, "new_stock", oldProduct.Stock+quantity)
+	log.Info("stock released successfully", "new_stock", newStock)
 	return nil
 }

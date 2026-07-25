@@ -49,7 +49,7 @@ func (p *Producer) ProduceProductUpdated(productID int64, changes map[string]any
 	}
 	value, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("error marshaling event", err)
+		return fmt.Errorf("error marshaling event: %w", err)
 	}
 	kafkamsg := &kafka.Message{
 		TopicPartition: kafka.TopicPartition{
@@ -61,6 +61,7 @@ func (p *Producer) ProduceProductUpdated(productID int64, changes map[string]any
 		Timestamp: time.Now(),
 	}
 	kafkachan := make(chan kafka.Event)
+	defer close(kafkachan)
 	if err := p.producer.Produce(kafkamsg, kafkachan); err != nil {
 		return fmt.Errorf("error while producing message: %w", err)
 	}
@@ -68,6 +69,9 @@ func (p *Producer) ProduceProductUpdated(productID int64, changes map[string]any
 	e := <-kafkachan
 	switch ev := e.(type) {
 	case *kafka.Message:
+		if ev.TopicPartition.Error != nil {
+			return fmt.Errorf("message delivery failed: %w", ev.TopicPartition.Error)
+		}
 		return nil
 	case kafka.Error:
 		return ev

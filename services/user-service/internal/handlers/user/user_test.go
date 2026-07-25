@@ -31,7 +31,7 @@ func setupUserTestRouter() *gin.Engine {
 	router.Use(func(c *gin.Context) {
 		c.Set("access_token", "test-token")
 		c.Set("user_id", int64(123))
-		c.Set("is_admin", false)
+		c.Set("role", domain.RoleCustomer)
 		c.Next()
 	})
 
@@ -301,10 +301,10 @@ func TestUserHandlers_GetProfile(t *testing.T) {
 			setupMock: func(m *mocks.MockUserService) {
 				m.On("GetUser", mock.Anything, int64(123)).
 					Return(domain.User{
-						Id:      123,
-						Email:   "test@example.com",
-						Name:    "Test User",
-						IsAdmin: false,
+						Id:    123,
+						Email: "test@example.com",
+						Name:  "Test User",
+						Role:  domain.RoleCustomer,
 					}, nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -314,7 +314,7 @@ func TestUserHandlers_GetProfile(t *testing.T) {
 				assert.Equal(t, float64(123), data["user_id"])
 				assert.Equal(t, "test@example.com", data["email"])
 				assert.Equal(t, "Test User", data["name"])
-				assert.Equal(t, false, data["is_admin"])
+				assert.Equal(t, "customer", data["role"])
 			},
 		},
 		{

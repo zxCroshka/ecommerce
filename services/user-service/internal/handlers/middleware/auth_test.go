@@ -18,8 +18,8 @@ type MockUserServiceForAuth struct {
 	mock.Mock
 }
 
-func (m *MockUserServiceForAuth) Register(ctx context.Context, email, password, name string, isAdmin bool) error {
-	args := m.Called(ctx, email, password, name, isAdmin)
+func (m *MockUserServiceForAuth) Register(ctx context.Context, email, password, name string) error {
+	args := m.Called(ctx, email, password, name)
 	return args.Error(0)
 }
 
@@ -64,9 +64,9 @@ func (m *MockUserServiceForAuth) GetUser(ctx context.Context, userID int64) (dom
 	return args.Get(0).(domain.User), args.Error(1)
 }
 
-func (m *MockUserServiceForAuth) ValidateToken(ctx context.Context, token string) (int64, bool, error) {
+func (m *MockUserServiceForAuth) ValidateToken(ctx context.Context, token string) (int64, domain.Role, error) {
 	args := m.Called(ctx, token)
-	return args.Get(0).(int64), args.Bool(1), args.Error(2)
+	return args.Get(0).(int64), args.Get(1).(domain.Role), args.Error(2)
 }
 
 func setupTestRouter() *gin.Engine {
@@ -90,7 +90,7 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 			authHeader: "Bearer valid-token-123",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "valid-token-123").
-					Return(int64(123), true, nil)
+					Return(int64(123), domain.RoleAdmin, nil)
 			},
 			expectedStatus: http.StatusOK,
 			checkContext: func(t *testing.T, c *gin.Context) {
@@ -98,9 +98,9 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 				assert.True(t, exists)
 				assert.Equal(t, int64(123), userID)
 
-				isAdmin, exists := c.Get("is_admin")
+				role, exists := c.Get("role")
 				assert.True(t, exists)
-				assert.Equal(t, true, isAdmin)
+				assert.Equal(t, domain.RoleAdmin, role)
 
 				token, exists := c.Get("access_token")
 				assert.True(t, exists)
@@ -112,14 +112,14 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 			authHeader: "Bearer customer-token",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "customer-token").
-					Return(int64(456), false, nil)
+					Return(int64(456), domain.RoleCustomer, nil)
 			},
 			expectedStatus: http.StatusOK,
 			checkContext: func(t *testing.T, c *gin.Context) {
 				userID, _ := c.Get("user_id")
 				assert.Equal(t, int64(456), userID)
-				isAdmin, _ := c.Get("is_admin")
-				assert.Equal(t, false, isAdmin)
+				role, _ := c.Get("role")
+				assert.Equal(t, domain.RoleCustomer, role)
 			},
 		},
 		{
@@ -145,7 +145,7 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 			authHeader: "Bearer invalid-token",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "invalid-token").
-					Return(int64(0), false, customerrors.ErrInvalidToken)
+					Return(int64(0), domain.Role(""), customerrors.ErrInvalidToken)
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -154,7 +154,7 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 			authHeader: "Bearer blacklisted-token",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "blacklisted-token").
-					Return(int64(0), false, customerrors.ErrTokenBlacklisted)
+					Return(int64(0), domain.Role(""), customerrors.ErrTokenBlacklisted)
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -163,7 +163,7 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 			authHeader: "Bearer token",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "token").
-					Return(int64(0), false, assert.AnError)
+					Return(int64(0), domain.Role(""), assert.AnError)
 			},
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -202,7 +202,7 @@ func TestAuthMiddleware_AuthRequired(t *testing.T) {
 func TestAuthMiddleware_ContextPropagation(t *testing.T) {
 	mockService := new(MockUserServiceForAuth)
 	mockService.On("ValidateToken", mock.Anything, "test-token").
-		Return(int64(999), true, nil)
+		Return(int64(999), domain.RoleAdmin, nil)
 
 	authMiddleware := NewAuthMiddleware(mockService)
 
@@ -213,9 +213,9 @@ func TestAuthMiddleware_ContextPropagation(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, int64(999), userID)
 
-		isAdmin, ok := c.Get("is_admin")
+		role, ok := c.Get("role")
 		assert.True(t, ok)
-		assert.Equal(t, true, isAdmin)
+		assert.Equal(t, domain.RoleAdmin, role)
 
 		token, ok := c.Get("access_token")
 		assert.True(t, ok)
@@ -237,7 +237,7 @@ func TestAuthMiddleware_ContextPropagation(t *testing.T) {
 func TestAuthMiddleware_MultipleMiddlewareChain(t *testing.T) {
 	mockService := new(MockUserServiceForAuth)
 	mockService.On("ValidateToken", mock.Anything, "valid-token").
-		Return(int64(123), false, nil)
+		Return(int64(123), domain.RoleCustomer, nil)
 
 	authMiddleware := NewAuthMiddleware(mockService)
 
@@ -281,7 +281,7 @@ func TestAuthMiddleware_EdgeCases(t *testing.T) {
 			authHeader: "Bearer ",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "").
-					Return(int64(0), false, customerrors.ErrInvalidToken)
+					Return(int64(0), domain.Role(""), customerrors.ErrInvalidToken)
 			},
 		},
 		{
@@ -289,7 +289,7 @@ func TestAuthMiddleware_EdgeCases(t *testing.T) {
 			authHeader: "Bearer   token-with-spaces  ",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "token-with-spaces").
-					Return(int64(123), false, nil)
+					Return(int64(123), domain.RoleCustomer, nil)
 			},
 		},
 		{
@@ -297,7 +297,7 @@ func TestAuthMiddleware_EdgeCases(t *testing.T) {
 			authHeader: "bearer lower-case-token",
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, "lower-case-token").
-					Return(int64(123), false, nil)
+					Return(int64(123), domain.RoleCustomer, nil)
 			},
 		},
 		{
@@ -305,7 +305,7 @@ func TestAuthMiddleware_EdgeCases(t *testing.T) {
 			authHeader: "Bearer " + string(make([]byte, 10000)),
 			setupMock: func(m *MockUserServiceForAuth) {
 				m.On("ValidateToken", mock.Anything, mock.Anything).
-					Return(int64(123), false, nil)
+					Return(int64(123), domain.RoleCustomer, nil)
 			},
 		},
 	}
@@ -340,7 +340,7 @@ func TestAuthMiddleware_EdgeCases(t *testing.T) {
 func BenchmarkAuthMiddleware_ValidToken(b *testing.B) {
 	mockService := new(MockUserServiceForAuth)
 	mockService.On("ValidateToken", mock.Anything, "bench-token").
-		Return(int64(123), false, nil)
+		Return(int64(123), domain.RoleCustomer, nil)
 
 	authMiddleware := NewAuthMiddleware(mockService)
 

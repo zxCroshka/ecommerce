@@ -47,7 +47,7 @@ func (h *AuthHandlers) Register(ctx *gin.Context) {
 		name = "anonymous user"
 	}
 
-	if err := h.srv.Register(ctx, req.Email, req.Password, name, name=="Croshka"); err != nil {
+	if err := h.srv.Register(ctx, req.Email, req.Password, name); err != nil {
 		if errors.Is(err, customerrors.ErrDuplicateEmail) {
 			log.Error("duplicate email error", "email", req.Email)
 			_ = ctx.Error(errs.NewConflictError("user with this email already exists"))
@@ -126,7 +126,7 @@ func (h *AuthHandlers) RefreshToken(ctx *gin.Context) {
 
 	tokenPair, err := h.srv.RefreshTokens(ctx, req.RefreshToken)
 	if err != nil {
-		if errors.Is(err, customerrors.ErrInvalidToken) {
+		if errors.Is(err, customerrors.ErrRefreshTokenNotFound) || errors.Is(err, customerrors.ErrInvalidToken) {
 			log.Error("invalid refresh token")
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid or expired refresh token"))
 			ctx.Abort()

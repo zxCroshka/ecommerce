@@ -12,8 +12,8 @@ type MockUserService struct {
 	mock.Mock
 }
 
-func (m *MockUserService) Register(ctx context.Context, email, password, name string, isAdmin bool) error {
-	args := m.Called(ctx, email, password, name, isAdmin)
+func (m *MockUserService) Register(ctx context.Context, email, password, name string) error {
+	args := m.Called(ctx, email, password, name)
 	return args.Error(0)
 }
 
@@ -58,7 +58,7 @@ func (m *MockUserService) GetUser(ctx context.Context, userID int64) (domain.Use
 	return args.Get(0).(domain.User), args.Error(1)
 }
 
-func (m *MockUserService) ValidateToken(ctx context.Context, token string) (int64, bool, error) {
+func (m *MockUserService) ValidateToken(ctx context.Context, token string) (int64, domain.Role, error) {
 	args := m.Called(ctx, token)
-	return args.Get(0).(int64), args.Bool(1), args.Error(2)
+	return args.Get(0).(int64), args.Get(1).(domain.Role), args.Error(2)
 }

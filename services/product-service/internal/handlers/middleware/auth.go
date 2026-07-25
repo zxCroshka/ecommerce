@@ -10,7 +10,7 @@ import (
 )
 
 type AuthMiddleware struct {
-	log *slog.Logger
+	log    *slog.Logger
 	secret []byte
 }
 
@@ -43,13 +43,9 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 
 		tokenString := parts[1]
 
-		// Парсим токен
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
 			return m.secret, nil
-		})
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 		if err != nil || !token.Valid {
 			m.log.Error("invalid token", "error", err)
@@ -70,14 +66,15 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 			return
 		}
 
-		// Извлекаем user_id и is_admin
+		// Извлекаем user_id и role
 		userID, userIDOk := claims["user_id"].(float64)
-		isAdmin, adminOk := claims["is_admin"].(bool)
+		role, roleOK := claims["role"].(string)
+		tokenType, tokenTypeOK := claims["token_type"].(string)
 
-		if !userIDOk {
+		if !userIDOk || !roleOK || !tokenTypeOK || tokenType != "access" {
 			m.log.Error("user_id not found in token")
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid token: user_id missing",
+				"error": "invalid access token claims",
 			})
 			c.Abort()
 			return
@@ -85,11 +82,12 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 
 		// Кладём в контекст
 		c.Set("user_id", int64(userID))
-		c.Set("isAdmin", isAdmin && adminOk)
-		
-		m.log.Debug("token validated", 
-			"user_id", userID, 
-			"is_admin", isAdmin && adminOk)
+		c.Set("role", role)
+		c.Set("isAdmin", role == "admin")
+
+		m.log.Debug("token validated",
+			"user_id", userID,
+			"role", role)
 
 		c.Next()
 	}
