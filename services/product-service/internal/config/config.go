@@ -37,9 +37,10 @@ func (h HTTPConfig) Address() string {
 }
 
 type GRPCConfig struct {
-	Host string        `mapstructure:"host"`
-	Port int           `mapstructure:"port"`
-	Ttl  time.Duration `mapstructure:"ttl"`
+	Host          string        `mapstructure:"host"`
+	Port          int           `mapstructure:"port"`
+	Ttl           time.Duration `mapstructure:"ttl"`
+	InternalToken string        `mapstructure:"internal_token"`
 }
 
 func (g GRPCConfig) Address() string {
@@ -112,6 +113,7 @@ func LoadConfig(configPath string) (*Config, error) {
 	_ = viper.BindEnv("postgres.password", "APP_POSTGRES_PASSWORD")
 	_ = viper.BindEnv("redis.password", "APP_REDIS_PASSWORD")
 	_ = viper.BindEnv("kafka.brokers", "APP_KAFKA_BROKERS")
+	_ = viper.BindEnv("grpc.internal_token", "APP_GRPC_INTERNAL_TOKEN")
 
 	viper.SetDefault("redis.ttl.product_cache", "5m")
 	viper.SetDefault("redis.ttl.products_list_cache", "5m")
@@ -184,6 +186,9 @@ func (c *Config) Validate() error {
 	}
 	if c.GRPC.Port <= 0 || c.GRPC.Port > 65535 {
 		return fmt.Errorf("grpc.port must be between 1 and 65535")
+	}
+	if c.GRPC.InternalToken == "" {
+		return fmt.Errorf("grpc.internal_token is required")
 	}
 
 	return nil

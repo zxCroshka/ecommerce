@@ -22,6 +22,7 @@ func New(
 	ctx context.Context,
 	log *slog.Logger,
 	grpcPort int,
+	grpcInternalToken string,
 	handlerPort int,
 	producer *kaf.Producer,
 	storageURL string,
@@ -51,9 +52,8 @@ func New(
 	if err != nil {
 		panic(err)
 	}
-
 	productService := service.New(log, storage, redisClient, producer)
-	grpcApp := grpcapp.New(log, productService, grpcPort)
+	grpcApp := grpcapp.New(log, productService, grpcPort, grpcInternalToken)
 	handlersApp := handlersapp.New(log, productService, handlerPort, jwtSecret)
 	return &App{
 		GRPCSrv:    grpcApp,

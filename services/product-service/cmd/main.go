@@ -44,6 +44,7 @@ func main() {
 		context.Background(),
 		log,
 		cfg.GRPC.Port,
+		cfg.GRPC.InternalToken,
 		cfg.HTTP.Port,
 		kafkaProducer,
 		postgresURL,

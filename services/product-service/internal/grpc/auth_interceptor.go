@@ -2,67 +2,62 @@ package grpc
 
 import (
 	"context"
-	"strings"
+	"crypto/subtle"
 
-	userservicev1 "github.com/zxCroshka/ecommerce/shared/userservice/gen/go"
+	productservicev1 "github.com/zxCroshka/ecommerce/shared/productservice/gen/go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
+const serviceTokenMetadataKey = "x-service-token"
+
 type AuthInterceptor struct {
-	userServiceClient userservicev1.UserClient
+	internalToken string
 }
 
-func NewAuthInterceptor(userServiceClient userservicev1.UserClient) *AuthInterceptor {
-	return &AuthInterceptor{userServiceClient: userServiceClient}
+func NewAuthInterceptor(internalToken string) *AuthInterceptor {
+	return &AuthInterceptor{internalToken: internalToken}
 }
 
-func (a *AuthInterceptor) unaryInterceptor() grpc.UnaryServerInterceptor {
+func (a *AuthInterceptor) UnaryInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
 		req interface{},
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		token, err := extractTokenFromMetadata(ctx)
-		if err != nil {
-			return nil, err
+		switch info.FullMethod {
+		case productservicev1.Products_GetProduct_FullMethodName:
+			return handler(ctx, req)
+		case
+			productservicev1.Products_ReserveStock_FullMethodName,
+			productservicev1.Products_ReleaseStock_FullMethodName:
+			if err := a.validateServiceToken(ctx); err != nil {
+				return nil, err
+			}
+			return handler(ctx, req)
+		default:
+			return nil, status.Error(codes.PermissionDenied, "access policy is not configured for this method")
 		}
-		userID, role, err := a.validateToken(ctx, token)
-		if err != nil {
-			return nil, err
-		}
-		ctx = context.WithValue(ctx, "userId", userID)
-		ctx = context.WithValue(ctx, "isAdmin", role == "admin")
-		return handler(ctx, req)
 	}
-
 }
 
-func extractTokenFromMetadata(ctx context.Context) (string, error) {
+func (a *AuthInterceptor) validateServiceToken(ctx context.Context) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", status.Errorf(codes.Unauthenticated, "missing metadata")
+		return status.Error(codes.Unauthenticated, "missing service credentials")
 	}
 
-	authHeaders := md.Get("authorization")
-	if len(authHeaders) == 0 {
-		return "", status.Errorf(codes.Unauthenticated, "missing authorization header")
+	values := md.Get(serviceTokenMetadataKey)
+	if len(values) != 1 {
+		return status.Error(codes.Unauthenticated, "missing service credentials")
 	}
-	authHeader := authHeaders[0]
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return "", status.Errorf(codes.Unauthenticated, "invalid authorization header format")
-	}
-	return parts[1], nil
-}
 
-func (a *AuthInterceptor) validateToken(ctx context.Context, token string) (int64, string, error) {
-	resp, err := a.userServiceClient.ValidateToken(ctx, &userservicev1.ValidateTokenRequest{Token: token})
-	if err != nil {
-		return 0, "", status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
+	if subtle.ConstantTimeCompare([]byte(values[0]), []byte(a.internalToken)) != 1 {
+		return status.Error(codes.Unauthenticated, "invalid service credentials")
 	}
-	return resp.UserId, resp.Role, nil
+
+	return nil
 }

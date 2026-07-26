@@ -12,3 +12,10 @@ services/user-service/user-service
 .idea/
 .DS_Store
 
+# Build artifacts
+**/bin/
+coverage.out
+coverage.html
+
+# Local configuration
+.env

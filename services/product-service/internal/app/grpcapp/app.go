@@ -19,8 +19,12 @@ func New(
 	log *slog.Logger,
 	productservice productgrpc.ProductService,
 	port int,
+	internalToken string,
 ) *App {
-	gRPCServer := grpc.NewServer()
+	authInterceptor := productgrpc.NewAuthInterceptor(internalToken)
+	gRPCServer := grpc.NewServer(
+		grpc.UnaryInterceptor(authInterceptor.UnaryInterceptor()),
+	)
 
 	productgrpc.RegisterServerAPI(gRPCServer, productservice)
 	return &App{
@@ -55,6 +59,5 @@ func (a *App) Run() error {
 func (a *App) Stop() {
 	const op = "grpcapp.Stop"
 	a.log.With(slog.String("op", op)).Info("stopping gRPC server ", slog.Int("port", a.port))
-
 	a.gRPCServer.GracefulStop()
 }
