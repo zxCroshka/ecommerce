@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
 	customerrors "github.com/zxCroshka/ecommerce/services/user-service/internal/repository/custom_errors"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/testhelper"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/users"
@@ -16,174 +17,148 @@ import (
 func TestStorage_SaveUser(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_ = tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage := users.New(tdb.Pool)
 
 	t.Run("successfully create user", func(t *testing.T) {
-		// Arrange
 		email := "test@example.com"
 		passHash := []byte("hashed_password")
 		name := "Test User"
-		isAdmin := false
+		role := domain.RoleCustomer
 		createdAt := time.Now()
 
-		// Act
-		id, err := storage.SaveUser(ctx, email, passHash, name, isAdmin, createdAt)
+		id, err := storage.SaveUser(ctx, email, passHash, name, role, createdAt)
 
-		// Assert
 		require.NoError(t, err)
-		assert.Greater(t, id, 0)
+		// ✅ Исправлено: используем EqualValues
+		assert.EqualValues(t, 1, id)
 
-		// Verify user was saved
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
 		assert.Equal(t, email, user.Email)
 		assert.Equal(t, name, user.Name)
-		assert.Equal(t, isAdmin, user.IsAdmin)
+		assert.Equal(t, role, user.Role)
 		assert.Equal(t, passHash, user.PassHash)
 	})
 
 	t.Run("duplicate email returns error", func(t *testing.T) {
-		// Arrange
 		email := "duplicate@example.com"
 		passHash := []byte("hash1")
 
-		// First user
-		_, err := storage.SaveUser(ctx, email, passHash, "User1", false, time.Now())
+		_, err := storage.SaveUser(ctx, email, passHash, "User1", domain.RoleCustomer, time.Now())
 		require.NoError(t, err)
 
-		// Act - try to create duplicate
-		_, err = storage.SaveUser(ctx, email, []byte("hash2"), "User2", false, time.Now())
+		_, err = storage.SaveUser(ctx, email, []byte("hash2"), "User2", domain.RoleCustomer, time.Now())
 
-		// Assert
 		require.Error(t, err)
-		assert.ErrorIs(t, err, customerrors.ErrUserExists)
+		assert.ErrorIs(t, err, customerrors.ErrDuplicateEmail)
 	})
 
 	t.Run("create admin user", func(t *testing.T) {
-		// Arrange
 		email := "admin@example.com"
 
-		// Act
-		id, err := storage.SaveUser(ctx, email, []byte("hash"), "Admin", true, time.Now())
+		id, err := storage.SaveUser(ctx, email, []byte("hash"), "Admin", domain.RoleAdmin, time.Now())
 
-		// Assert
 		require.NoError(t, err)
-		assert.Greater(t, id, 0)
+		assert.Greater(t, id, int64(0))
 
-		// Verify admin flag
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
-		assert.True(t, user.IsAdmin)
+		assert.Equal(t, domain.RoleAdmin, user.Role)
 	})
 }
 
 func TestStorage_User(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_=tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage := users.New(tdb.Pool)
 
 	t.Run("get existing user", func(t *testing.T) {
-		// Arrange - create user first
 		email := "find@example.com"
 		passHash := []byte("hash")
 		name := "Find User"
-		isAdmin := false
+		role := domain.RoleCustomer
 		createdAt := time.Now()
 
-		_, err := storage.SaveUser(ctx, email, passHash, name, isAdmin, createdAt)
+		_, err := storage.SaveUser(ctx, email, passHash, name, role, createdAt)
 		require.NoError(t, err)
 
-		// Act
 		user, err := storage.User(ctx, email)
 
-		// Assert
 		require.NoError(t, err)
 		assert.Equal(t, email, user.Email)
 		assert.Equal(t, name, user.Name)
-		assert.Equal(t, isAdmin, user.IsAdmin)
+		assert.Equal(t, role, user.Role)
 		assert.Equal(t, passHash, user.PassHash)
 		assert.NotZero(t, user.CreatedAt)
 	})
 
 	t.Run("get non-existent user", func(t *testing.T) {
-		// Act
 		_, err := storage.User(ctx, "nonexistent@example.com")
 
-		// Assert
 		require.Error(t, err)
 		assert.ErrorIs(t, err, customerrors.ErrUserNotFound)
 	})
 }
 
-func TestStorage_IsAdmin(t *testing.T) {
+func TestStorage_Role(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_=tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage := users.New(tdb.Pool)
 
 	t.Run("regular user is not admin", func(t *testing.T) {
-		// Arrange
 		email := "regular@example.com"
-		_, err := storage.SaveUser(ctx, email, []byte("hash"), "Regular", false, time.Now())
+		_, err := storage.SaveUser(ctx, email, []byte("hash"), "Regular", domain.RoleCustomer, time.Now())
 		require.NoError(t, err)
 
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
 
-		// Act
-		isAdmin, err := storage.IsAdmin(ctx, user.Id)
+		role, err := storage.Role(ctx, user.Id)
 
-		// Assert
 		require.NoError(t, err)
-		assert.False(t, isAdmin)
+		assert.Equal(t, domain.RoleCustomer, role)
 	})
 
 	t.Run("admin user is admin", func(t *testing.T) {
-		// Arrange
 		email := "admin@example.com"
-		_, err := storage.SaveUser(ctx, email, []byte("hash"), "Admin", true, time.Now())
+		_, err := storage.SaveUser(ctx, email, []byte("hash"), "Admin", domain.RoleAdmin, time.Now())
 		require.NoError(t, err)
 
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
 
-		// Act
-		isAdmin, err := storage.IsAdmin(ctx, user.Id)
+		role, err := storage.Role(ctx, user.Id)
 
-		// Assert
 		require.NoError(t, err)
-		assert.True(t, isAdmin)
+		assert.Equal(t, domain.RoleAdmin, role)
 	})
 }
 
 func TestStorage_UpdateName(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_=tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage := users.New(tdb.Pool)
 
 	t.Run("update user name", func(t *testing.T) {
-		// Arrange
 		email := "updatename@example.com"
-		_, err := storage.SaveUser(ctx, email, []byte("hash"), "Old Name", false, time.Now())
+		_, err := storage.SaveUser(ctx, email, []byte("hash"), "Old Name", domain.RoleCustomer, time.Now())
 		require.NoError(t, err)
 
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
 
-		// Act
 		err = storage.UpdateName(ctx, user.Id, "New Name")
 
-		// Assert
 		require.NoError(t, err)
 
-		// Verify update
 		updatedUser, err := storage.User(ctx, email)
 		require.NoError(t, err)
 		assert.Equal(t, "New Name", updatedUser.Name)
@@ -193,31 +168,26 @@ func TestStorage_UpdateName(t *testing.T) {
 func TestStorage_UpdateEmail(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_=tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage := users.New(tdb.Pool)
 
 	t.Run("update user email", func(t *testing.T) {
-		// Arrange
 		oldEmail := "old@example.com"
 		newEmail := "new@example.com"
-		_, err := storage.SaveUser(ctx, oldEmail, []byte("hash"), "User", false, time.Now())
+		_, err := storage.SaveUser(ctx, oldEmail, []byte("hash"), "User", domain.RoleCustomer, time.Now())
 		require.NoError(t, err)
 
 		user, err := storage.User(ctx, oldEmail)
 		require.NoError(t, err)
 
-		// Act
 		err = storage.UpdateEmail(ctx, user.Id, newEmail)
 
-		// Assert
 		require.NoError(t, err)
 
-		// Old email should not exist
 		_, err = storage.User(ctx, oldEmail)
 		assert.ErrorIs(t, err, customerrors.ErrUserNotFound)
 
-		// New email should exist
 		updatedUser, err := storage.User(ctx, newEmail)
 		require.NoError(t, err)
 		assert.Equal(t, newEmail, updatedUser.Email)
@@ -227,29 +197,25 @@ func TestStorage_UpdateEmail(t *testing.T) {
 func TestStorage_UpdatePassword(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_=tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage := users.New(tdb.Pool)
 
 	t.Run("update user password", func(t *testing.T) {
-		// Arrange
 		email := "updatepass@example.com"
 		oldHash := []byte("old_hash")
-		_, err := storage.SaveUser(ctx, email, oldHash, "User", false, time.Now())
+		_, err := storage.SaveUser(ctx, email, oldHash, "User", domain.RoleCustomer, time.Now())
 		require.NoError(t, err)
 
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
 		assert.Equal(t, oldHash, user.PassHash)
 
-		// Act
 		newHash := []byte("new_hash")
 		err = storage.UpdatePassword(ctx, user.Id, newHash)
 
-		// Assert
 		require.NoError(t, err)
 
-		// Verify update
 		updatedUser, err := storage.User(ctx, email)
 		require.NoError(t, err)
 		assert.Equal(t, newHash, updatedUser.PassHash)

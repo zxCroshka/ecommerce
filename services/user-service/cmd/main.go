@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -10,24 +9,21 @@ import (
 
 	"github.com/zxCroshka/ecommerce/services/user-service/app"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/config"
-	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository"
-	kaf "github.com/zxCroshka/ecommerce/services/user-service/kafka"
-)
-
-const (
-	envLocal = "local"
-	envDev   = "dev"
-	envProd  = "prod"
+	kaf "github.com/zxCroshka/ecommerce/services/user-service/internal/kafka"
 )
 
 func main() {
-	cfg, err := config.LoadConfig("services/user-service/config/local.yml")
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
+	cfg, err := config.LoadConfig("./config/config.yaml")
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
 	}
 
-	log := setupLogger(cfg.Service.Environment)
+	log := setupLogger(cfg.Logging)
 	log.Info("Starting user-service", "environment", cfg.Service.Environment)
 
 	kafkaProducer, err := kaf.NewProducer(cfg.Kafka.Brokers)
@@ -37,80 +33,72 @@ func main() {
 	}
 	defer kafkaProducer.Close()
 
-	postgresCfg := repository.NewConfig(
-		struct {
-			Host     string
-			Port     uint16
-			User     string
-			Password string
-			Database string
-			Sslmode  string
-		}{
-			Host:     cfg.Postgres.Host,
-			Port:     uint16(cfg.Postgres.Port),
-			User:     cfg.Postgres.User,
-			Password: cfg.Postgres.Password,
-			Database: cfg.Postgres.Database,
-			Sslmode:  cfg.Postgres.SSLMode,
-		})
+	postgresURL := cfg.Postgres.GetPostgresURL()
 
-	postgresURL := repository.GetPostgresURL(postgresCfg)
-	fmt.Println("POSTGRES URL:",postgresURL)
-
-		log.Info(
+	log.Info(
 		"starting application",
-		slog.String("env", cfg.Service.Environment),
-		slog.Any("cfg", cfg),
+		slog.String("service", cfg.Service.Name),
+		slog.String("environment", cfg.Service.Environment),
+		slog.Group("http",
+			slog.String("address", cfg.HTTP.Address()),
+		),
+		slog.Group("grpc",
+			slog.String("address", cfg.GRPC.Address()),
+		),
+		slog.Group("postgres",
+			slog.String("host", cfg.Postgres.Host),
+			slog.Int("port", cfg.Postgres.Port),
+			slog.String("user", cfg.Postgres.User),
+			slog.String("database", cfg.Postgres.Database),
+			slog.String("sslmode", cfg.Postgres.SSLMode),
+		),
+		slog.Group("redis",
+			slog.String("address", cfg.Redis.Address()),
+			slog.Int("db", cfg.Redis.DB),
+		),
+		slog.Group("kafka",
+			slog.Any("brokers", cfg.Kafka.Brokers),
+			slog.String("user_registered_topic", cfg.Kafka.Topic.UserRegistered),
+		),
+		slog.Group("jwt",
+			slog.Duration("access_ttl", cfg.JWT.AccessTTL),
+			slog.Duration("refresh_ttl", cfg.JWT.RefreshTTL),
+		),
+		slog.Group("logging",
+			slog.String("level", cfg.Logging.Level),
+			slog.String("format", cfg.Logging.Format),
+		),
+		slog.Bool("pprof_enabled", cfg.Pprof.Enabled),
 	)
 	application := app.New(
-		context.Background(),
+		ctx,
 		log,
 		cfg.GRPC.Port,
 		cfg.HTTP.Port,
 		kafkaProducer,
 		postgresURL,
-		cfg.TokenTTL,
-		cfg.AccessTokenExpireIn,
-		cfg.RefreshTokenExpireIn,
+		cfg.JWT.AccessTTL,
+		cfg.JWT.RefreshTTL,
 		cfg.Redis.Host,
 		cfg.Redis.Port,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
-		cfg.JwtSecret,
+		cfg.JWT.Secret,
+		cfg.Pprof.Enabled,
 	)
-	go application.GRPCSrv.MustRun()
-
-	go application.HandlerSrv.MustRun()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-	s := <-stop
-
-	log.Info("stopping application", slog.String("signal", s.String()))
-
-	application.GRPCSrv.Stop()
+	application.Start(ctx)
 	log.Info("application stopped")
 }
 
-func setupLogger(env string) *slog.Logger {
-	var log *slog.Logger
-	switch env {
-	case envLocal:
-		log = slog.New(
-			slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}),
-		)
-	case envDev:
-		log = slog.New(
-			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}),
-		)
-	case envProd:
-		log = slog.New(
-			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}),
-		)
-	default:
-		log = slog.New(
-			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}),
-		)
+func setupLogger(cfg config.LoggingConfig) *slog.Logger {
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
+		level = slog.LevelInfo
 	}
-	return log
+
+	options := &slog.HandlerOptions{Level: level}
+	if cfg.Format == "text" {
+		return slog.New(slog.NewTextHandler(os.Stdout, options))
+	}
+	return slog.New(slog.NewJSONHandler(os.Stdout, options))
 }

@@ -6,9 +6,9 @@ import (
 
 type Role string
 
-var (
-	Admin    Role = "admin"
-	Customer Role = "customer"
+const (
+	RoleCustomer Role = "customer"
+	RoleAdmin    Role = "admin"
 )
 
 type User struct {
@@ -16,7 +16,7 @@ type User struct {
 	Email     string
 	PassHash  []byte
 	Name      string
-	IsAdmin   bool
+	Role      Role
 	CreatedAt time.Time
 }
 
@@ -24,7 +24,7 @@ func New(id int64,
 	email string,
 	passHash []byte,
 	name string,
-	isAdmin bool,
+	role Role,
 	createdAt time.Time,
 ) *User {
 	if len(email) == 0 {
@@ -38,7 +38,7 @@ func New(id int64,
 		Email:     email,
 		PassHash:  passHash,
 		Name:      name,
-		IsAdmin:   isAdmin,
+		Role:      role,
 		CreatedAt: createdAt,
 	}
 }

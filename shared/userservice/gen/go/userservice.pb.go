@@ -4,7 +4,7 @@
 // 	protoc        v3.21.12
 // source: userservice.proto
 
-package userservicrev1
+package userservicev1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -68,7 +68,7 @@ func (x *ValidateTokenRequest) GetToken() string {
 type ValidateTokenResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	IsAdmin       bool                   `protobuf:"varint,2,opt,name=is_admin,json=isAdmin,proto3" json:"is_admin,omitempty"`
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -110,11 +110,11 @@ func (x *ValidateTokenResponse) GetUserId() int64 {
 	return 0
 }
 
-func (x *ValidateTokenResponse) GetIsAdmin() bool {
+func (x *ValidateTokenResponse) GetRole() string {
 	if x != nil {
-		return x.IsAdmin
+		return x.Role
 	}
-	return false
+	return ""
 }
 
 type GetUserRequest struct {
@@ -164,8 +164,8 @@ func (x *GetUserRequest) GetUserId() int64 {
 type GetUserResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
-	IsAdmin       bool                   `protobuf:"varint,2,opt,name=is_admin,json=isAdmin,proto3" json:"is_admin,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -207,16 +207,16 @@ func (x *GetUserResponse) GetEmail() string {
 	return ""
 }
 
-func (x *GetUserResponse) GetIsAdmin() bool {
-	if x != nil {
-		return x.IsAdmin
-	}
-	return false
-}
-
 func (x *GetUserResponse) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *GetUserResponse) GetRole() string {
+	if x != nil {
+		return x.Role
 	}
 	return ""
 }
@@ -227,19 +227,19 @@ const file_userservice_proto_rawDesc = "" +
 	"\n" +
 	"\x11userservice.proto\x12\vuserservice\",\n" +
 	"\x14ValidateTokenRequest\x12\x14\n" +
-	"\x05token\x18\x01 \x01(\tR\x05token\"K\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\"D\n" +
 	"\x15ValidateTokenResponse\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x19\n" +
-	"\bis_admin\x18\x02 \x01(\bR\aisAdmin\")\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\")\n" +
 	"\x0eGetUserRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\"V\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\"O\n" +
 	"\x0fGetUserResponse\x12\x14\n" +
-	"\x05email\x18\x01 \x01(\tR\x05email\x12\x19\n" +
-	"\bis_admin\x18\x02 \x01(\bR\aisAdmin\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name2\xa4\x01\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role2\xa4\x01\n" +
 	"\x04User\x12V\n" +
 	"\rValidateToken\x12!.userservice.ValidateTokenRequest\x1a\".userservice.ValidateTokenResponse\x12D\n" +
-	"\aGetUser\x12\x1b.userservice.GetUserRequest\x1a\x1c.userservice.GetUserResponseBIZGgithub.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicrev1b\x06proto3"
+	"\aGetUser\x12\x1b.userservice.GetUserRequest\x1a\x1c.userservice.GetUserResponseBHZFgithub.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicev1b\x06proto3"
 
 var (
 	file_userservice_proto_rawDescOnce sync.Once

@@ -1,4 +1,3 @@
-// internal/repository/storage_test.go
 package repository_test
 
 import (
@@ -8,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository"
 	customerrors "github.com/zxCroshka/ecommerce/services/user-service/internal/repository/custom_errors"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/testhelper"
@@ -16,7 +16,7 @@ import (
 func TestStorage_RegisterUserTX(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_ = tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage, err := repository.NewForTests(ctx, tdb.Pool)
 	require.NoError(t, err)
@@ -26,21 +26,22 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		email := "register@example.com"
 		passHash := []byte("hashed_password")
 		name := "Register User"
-		isAdmin := false
+		role := domain.RoleCustomer
 
 		// Act
-		userID, err := storage.RegisterUserTX(ctx, email, passHash, name, isAdmin)
+		userID, err := storage.RegisterUserTX(ctx, email, passHash, name, role)
 
 		// Assert
 		require.NoError(t, err)
-		assert.Greater(t, userID, 0)
+		// ✅ Исправлено: проверяем что ID > 0, а не конкретное значение
+		assert.Greater(t, userID, int64(0))
 
 		// Verify user was created
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
 		assert.Equal(t, email, user.Email)
 		assert.Equal(t, name, user.Name)
-		assert.Equal(t, isAdmin, user.IsAdmin)
+		assert.Equal(t, role, user.Role)
 		assert.Equal(t, passHash, user.PassHash)
 		assert.NotZero(t, user.CreatedAt)
 	})
@@ -51,21 +52,21 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		passHash := []byte("hash1")
 
 		// First registration
-		_, err := storage.RegisterUserTX(ctx, email, passHash, "User1", false)
+		_, err := storage.RegisterUserTX(ctx, email, passHash, "User1", domain.RoleCustomer)
 		require.NoError(t, err)
 
 		// Act - try to register again
-		_, err = storage.RegisterUserTX(ctx, email, []byte("hash2"), "User2", false)
+		_, err = storage.RegisterUserTX(ctx, email, []byte("hash2"), "User2", domain.RoleCustomer)
 
 		// Assert
 		require.Error(t, err)
-		assert.ErrorIs(t, err, customerrors.ErrUserExists)
+		assert.ErrorIs(t, err, customerrors.ErrDuplicateEmail)
 
 		// Verify data wasn't changed (transaction rolled back)
 		user, err := storage.User(ctx, email)
 		require.NoError(t, err)
-		assert.Equal(t, "User1", user.Name)      // Name should remain original
-		assert.Equal(t, passHash, user.PassHash) // Hash should remain original
+		assert.Equal(t, "User1", user.Name)
+		assert.Equal(t, passHash, user.PassHash)
 	})
 
 	t.Run("register admin user", func(t *testing.T) {
@@ -73,16 +74,17 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		email := "admin_register@example.com"
 
 		// Act
-		userID, err := storage.RegisterUserTX(ctx, email, []byte("hash"), "Admin User", true)
+		userID, err := storage.RegisterUserTX(ctx, email, []byte("hash"), "Admin User", domain.RoleAdmin)
 
 		// Assert
 		require.NoError(t, err)
-		assert.Greater(t, userID, 0)
+		// ✅ Исправлено: проверяем что ID > 0
+		assert.Greater(t, userID, int64(0))
 
-		// Verify admin flag
-		isAdmin, err := storage.IsAdmin(ctx, userID)
+		// Verify role
+		role, err := storage.Role(ctx, userID)
 		require.NoError(t, err)
-		assert.True(t, isAdmin)
+		assert.Equal(t, domain.RoleAdmin, role)
 	})
 
 	t.Run("concurrent registrations with same email", func(t *testing.T) {
@@ -90,13 +92,13 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		email := "concurrent@example.com"
 
 		// Act - try to register concurrently
-		done := make(chan error)
+		done := make(chan error, 2)
 		go func() {
-			_, err := storage.RegisterUserTX(ctx, email, []byte("hash1"), "User1", false)
+			_, err := storage.RegisterUserTX(ctx, email, []byte("hash1"), "User1", domain.RoleCustomer)
 			done <- err
 		}()
 		go func() {
-			_, err := storage.RegisterUserTX(ctx, email, []byte("hash2"), "User2", false)
+			_, err := storage.RegisterUserTX(ctx, email, []byte("hash2"), "User2", domain.RoleCustomer)
 			done <- err
 		}()
 
@@ -104,12 +106,13 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		err1 := <-done
 		err2 := <-done
 
-		// One success, one failure
 		if err1 == nil {
 			assert.Error(t, err2)
-			assert.ErrorIs(t, err2, customerrors.ErrUserExists)
+			assert.ErrorIs(t, err2, customerrors.ErrDuplicateEmail)
+			assert.NoError(t, err1)
 		} else {
-			assert.ErrorIs(t, err1, customerrors.ErrUserExists)
+			assert.Error(t, err1)
+			assert.ErrorIs(t, err1, customerrors.ErrDuplicateEmail)
 			assert.NoError(t, err2)
 		}
 
@@ -122,7 +125,7 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 func TestStorage_CRUDOperations(t *testing.T) {
 	tdb := testhelper.SetupTestPostgres(t)
 	ctx := context.Background()
-	defer func(){_ = tdb.TruncateTables(ctx)}()
+	defer func() { _ = tdb.TruncateTables(ctx) }()
 
 	storage, err := repository.NewForTests(ctx, tdb.Pool)
 	require.NoError(t, err)
@@ -132,8 +135,10 @@ func TestStorage_CRUDOperations(t *testing.T) {
 	passHash := []byte("hash")
 	name := "CRUD User"
 
-	userID, err := storage.RegisterUserTX(ctx, email, passHash, name, false)
+	userID, err := storage.RegisterUserTX(ctx, email, passHash, name, domain.RoleCustomer)
 	require.NoError(t, err)
+	// ✅ Исправлено: просто проверяем что ID > 0
+	assert.Greater(t, userID, int64(0))
 
 	t.Run("get user by email", func(t *testing.T) {
 		// Act

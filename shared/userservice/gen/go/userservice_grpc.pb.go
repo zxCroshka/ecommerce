@@ -4,7 +4,7 @@
 // - protoc             v3.21.12
 // source: userservice.proto
 
-package userservicrev1
+package userservicev1
 
 import (
 	context "context"

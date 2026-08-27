@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS userservice.users (
 	email TEXT NOT NULL UNIQUE,
 	password_hash BYTEA NOT NULL,
 	name TEXT,
-	is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+	role TEXT NOT NULL DEFAULT 'customer' CHECK (role IN ('customer', 'admin')),
 	created_at TIMESTAMP DEFAULT NOW()
 
 );

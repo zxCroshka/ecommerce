@@ -15,40 +15,6 @@ import (
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/users"
 )
 
-type Config struct {
-	Postgres struct {
-		Host     string
-		Port     uint16
-		User     string
-		Password string
-		Database string
-		Sslmode  string
-	}
-}
-
-func NewConfig(Postgres struct {
-	Host     string
-	Port     uint16
-	User     string
-	Password string
-	Database string
-	Sslmode  string
-}) Config {
-	return Config{
-		Postgres: Postgres,
-	}
-}
-func GetPostgresURL(cfg Config) string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		cfg.Postgres.User,
-		cfg.Postgres.Password,
-		cfg.Postgres.Host,
-		cfg.Postgres.Port,
-		cfg.Postgres.Database,
-		cfg.Postgres.Sslmode,
-	)
-}
-
 type Storage struct {
 	pool  *pgxpool.Pool
 	users *users.Storage
@@ -64,10 +30,9 @@ func NewForTests(ctx context.Context, pool *pgxpool.Pool) (*Storage, error) {
 func New(ctx context.Context, storageURL string) (*Storage, error) {
 	cfg, err := pgxpool.ParseConfig(storageURL)
 	if err != nil {
-		if err != nil {
-			slog.Error(fmt.Sprintf("error parsing connection config: %v", err))
-			return nil, err
-		}
+		slog.Error(fmt.Sprintf("error parsing connection config: %v", err))
+		return nil, err
+
 	}
 	slog.Info("Database config",
 		"host", cfg.ConnConfig.Host,
@@ -95,13 +60,13 @@ func (s *Storage) RegisterUserTX(
 	email string,
 	passHash []byte,
 	name string,
-	isAdmin bool,
+	role domain.Role,
 ) (int64, error) {
 	var userID int64
 	err := db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
 		Users := s.users.WithTX(tx)
 		createdAt := time.Now()
-		id, err := Users.SaveUser(ctx, email, passHash, name, isAdmin, createdAt)
+		id, err := Users.SaveUser(ctx, email, passHash, name, role, createdAt)
 		if err != nil {
 			return err
 		}
@@ -109,7 +74,7 @@ func (s *Storage) RegisterUserTX(
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, customerrors.ErrUserExists) {
+		if errors.Is(err, customerrors.ErrDuplicateEmail) {
 			slog.Info("user already exists", "email", email)
 		} else {
 			slog.Error("failed to register user", "email", email, "error", err)
@@ -128,8 +93,8 @@ func (s *Storage) UserByID(ctx context.Context, userID int64) (domain.User, erro
 	return s.users.UserByID(ctx, userID)
 }
 
-func (s *Storage) IsAdmin(ctx context.Context, userID int64) (bool, error) {
-	return s.users.IsAdmin(ctx, userID)
+func (s *Storage) Role(ctx context.Context, userID int64) (domain.Role, error) {
+	return s.users.Role(ctx, userID)
 }
 
 func (s *Storage) UpdateName(ctx context.Context, userID int64, newName string) error {

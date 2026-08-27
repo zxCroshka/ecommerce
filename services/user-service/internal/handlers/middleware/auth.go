@@ -9,10 +9,10 @@ import (
 )
 
 type AuthMiddleware struct {
-	userService *service.UserService
+	userService service.UserServiceInterface
 }
 
-func NewAuthMiddleware(userService *service.UserService) *AuthMiddleware {
+func NewAuthMiddleware(userService service.UserServiceInterface) *AuthMiddleware {
 	return &AuthMiddleware{
 		userService: userService,
 	}
@@ -25,7 +25,7 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "missing authorization header",
 			})
-			c.Abort() 
+			c.Abort()
 			return
 		}
 
@@ -38,9 +38,9 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 			return
 		}
 
-		token := parts[1]
+		token := strings.TrimSpace(parts[1])
 
-		userID, isAdmin, err := m.userService.ValidateToken(c.Request.Context(), token)
+		userID, role, err := m.userService.ValidateToken(c.Request.Context(), token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid or expired token",
@@ -50,7 +50,7 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 		}
 
 		c.Set("user_id", userID)
-		c.Set("is_admin", isAdmin)
+		c.Set("role", role)
 		c.Set("access_token", token)
 
 		c.Next()

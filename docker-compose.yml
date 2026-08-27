@@ -1,3 +1,7 @@
+networks:
+  ecommerce-network:
+    driver: bridge
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -10,11 +14,14 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-network
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -23,11 +30,14 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - ecommerce-network
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
@@ -37,12 +47,15 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    networks:
+      - ecommerce-network
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "2181"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -52,6 +65,8 @@ services:
         condition: service_healthy
     ports:
       - "9092:9092"
+    networks:
+      - ecommerce-network
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -59,11 +74,14 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
-      test: [ "CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list" ]
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
@@ -72,11 +90,113 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8088:8080"
+    networks:
+      - ecommerce-network
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    restart: unless-stopped
+
+  migrate-user:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./services/user-service/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/ecommerce?sslmode=disable&x-migrations-table=userservice_schema_migrations"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  migrate-product:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./services/product-service/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/ecommerce?sslmode=disable&x-migrations-table=productservice_schema_migrations"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    environment:
+      APP_POSTGRES_HOST: postgres
+      APP_REDIS_HOST: redis
+      APP_KAFKA_BROKERS: kafka:29092
+      APP_JWT_SECRET: local-dev-secret-key-2024-change-me-in-production
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+      - "3366:3366"
+    depends_on:
+      migrate-user:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    restart: on-failure
+  product-service:
+    build:
+      context: .
+      dockerfile: services/product-service/Dockerfile
+    environment:
+      APP_POSTGRES_HOST: postgres
+      APP_REDIS_HOST: redis
+      APP_KAFKA_BROKERS: kafka:29092
+      APP_USER_SERVICE_ADDRESS: user-service:9090
+      APP_GRPC_INTERNAL_TOKEN: local-dev-product-service-token-change-me
+      APP_JWT_SECRET: local-dev-secret-key-2024-change-me-in-production
+    ports:
+      - "8081:8081"
+      - "9091:9091"
+    depends_on:
+      migrate-product:
+        condition: service_completed_successfully
+      user-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    restart: on-failure
+
+  cart-service:
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    environment:
+      APP_REDIS_HOST: redis
+      APP_PRODUCT_SERVICE_ADDRESS: product-service:9091
+    ports:
+      - "9093:9093"
+    depends_on:
+      product-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    restart: on-failure
 
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local

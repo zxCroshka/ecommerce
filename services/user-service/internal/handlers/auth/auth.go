@@ -14,10 +14,10 @@ import (
 
 type AuthHandlers struct {
 	log *slog.Logger
-	srv *service.UserService
+	srv service.UserServiceInterface
 }
 
-func New(log *slog.Logger, srv *service.UserService) *AuthHandlers {
+func New(log *slog.Logger, srv service.UserServiceInterface) *AuthHandlers {
 	return &AuthHandlers{
 		log: log,
 		srv: srv,
@@ -38,6 +38,7 @@ func (h *AuthHandlers) Register(ctx *gin.Context) {
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		log.Error("failed to bind request", "error", err)
 		_ = ctx.Error(errs.NewBadRequestError("invalid request body"))
+		ctx.Abort()
 		return
 	}
 
@@ -46,14 +47,16 @@ func (h *AuthHandlers) Register(ctx *gin.Context) {
 		name = "anonymous user"
 	}
 
-	if err := h.srv.Register(ctx, req.Email, req.Password, name, false); err != nil {
+	if err := h.srv.Register(ctx, req.Email, req.Password, name); err != nil {
 		if errors.Is(err, customerrors.ErrDuplicateEmail) {
 			log.Error("duplicate email error", "email", req.Email)
 			_ = ctx.Error(errs.NewConflictError("user with this email already exists"))
+			ctx.Abort()
 			return
 		}
 		log.Error("internal server error", "error", err)
 		_ = ctx.Error(errs.NewInternalServerError("failed to register user"))
+		ctx.Abort()
 		return
 	}
 
@@ -76,6 +79,7 @@ func (h *AuthHandlers) Login(ctx *gin.Context) {
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		log.Error("failed to bind request", "error", err)
 		_ = ctx.Error(errs.NewBadRequestError("invalid request body"))
+		ctx.Abort()
 		return
 	}
 
@@ -84,10 +88,12 @@ func (h *AuthHandlers) Login(ctx *gin.Context) {
 		if errors.Is(err, customerrors.ErrInvalidCredentials) {
 			log.Error("invalid credentials", "email", req.Email)
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid email or password"))
+			ctx.Abort()
 			return
 		}
 		log.Error("internal server error", "error", err)
 		_ = ctx.Error(errs.NewInternalServerError("failed to login"))
+		ctx.Abort()
 		return
 	}
 
@@ -97,7 +103,7 @@ func (h *AuthHandlers) Login(ctx *gin.Context) {
 			"access_token":  tokenPair.AccessToken,
 			"refresh_token": tokenPair.RefreshToken,
 			"token_type":    "Bearer",
-			"expires_in":    900, // 15 минут в секундах
+			"expires_in":    900,
 		},
 	})
 }
@@ -114,18 +120,21 @@ func (h *AuthHandlers) RefreshToken(ctx *gin.Context) {
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		log.Error("failed to bind request", "error", err)
 		_ = ctx.Error(errs.NewBadRequestError("refresh_token is required"))
+		ctx.Abort()
 		return
 	}
 
 	tokenPair, err := h.srv.RefreshTokens(ctx, req.RefreshToken)
 	if err != nil {
-		if errors.Is(err, customerrors.ErrInvalidToken) {
+		if errors.Is(err, customerrors.ErrRefreshTokenNotFound) || errors.Is(err, customerrors.ErrInvalidToken) {
 			log.Error("invalid refresh token")
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid or expired refresh token"))
+			ctx.Abort()
 			return
 		}
 		log.Error("internal server error", "error", err)
 		_ = ctx.Error(errs.NewInternalServerError("failed to refresh tokens"))
+		ctx.Abort()
 		return
 	}
 
@@ -148,14 +157,13 @@ func (h *AuthHandlers) Logout(ctx *gin.Context) {
 	const op = "handlers.auth.Logout"
 	log := h.log.With(slog.String("op", op))
 
-	// Получаем access token из заголовка
 	accessToken := ctx.GetHeader("Authorization")
 	if accessToken == "" {
 		_ = ctx.Error(errs.NewBadRequestError("authorization header is required"))
+		ctx.Abort()
 		return
 	}
 
-	// Убираем "Bearer " если есть
 	if len(accessToken) > 7 && accessToken[:7] == "Bearer " {
 		accessToken = accessToken[7:]
 	}
@@ -164,6 +172,7 @@ func (h *AuthHandlers) Logout(ctx *gin.Context) {
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		log.Error("failed to bind request", "error", err)
 		_ = ctx.Error(errs.NewBadRequestError("refresh_token is required"))
+		ctx.Abort()
 		return
 	}
 
@@ -171,10 +180,12 @@ func (h *AuthHandlers) Logout(ctx *gin.Context) {
 		if errors.Is(err, customerrors.ErrInvalidToken) {
 			log.Error("invalid token during logout")
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid token"))
+			ctx.Abort()
 			return
 		}
 		log.Error("internal server error", "error", err)
 		_ = ctx.Error(errs.NewInternalServerError("failed to logout"))
+		ctx.Abort()
 		return
 	}
 
