@@ -29,7 +29,6 @@ func setupUserTestRouter() *gin.Engine {
 
 	// Middleware для имитации аутентификации
 	router.Use(func(c *gin.Context) {
-		c.Set("access_token", "test-token")
 		c.Set("user_id", int64(123))
 		c.Set("role", domain.RoleCustomer)
 		c.Next()
@@ -52,7 +51,7 @@ func TestUserHandlers_UpdateEmail(t *testing.T) {
 				NewEmail: "new@example.com",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("UpdateEmail", mock.Anything, "test-token", "new@example.com").
+				m.On("UpdateEmail", mock.Anything, int64(123), "new@example.com").
 					Return(nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -67,7 +66,7 @@ func TestUserHandlers_UpdateEmail(t *testing.T) {
 				NewEmail: "existing@example.com",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("UpdateEmail", mock.Anything, "test-token", "existing@example.com").
+				m.On("UpdateEmail", mock.Anything, int64(123), "existing@example.com").
 					Return(customerrors.ErrDuplicateEmail)
 			},
 			expectedStatus: http.StatusConflict,
@@ -140,7 +139,7 @@ func TestUserHandlers_UpdateName(t *testing.T) {
 				NewName: "New Name",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("UpdateName", mock.Anything, "test-token", "New Name").
+				m.On("UpdateName", mock.Anything, int64(123), "New Name").
 					Return(nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -212,7 +211,7 @@ func TestUserHandlers_UpdatePassword(t *testing.T) {
 				NewPassword: "newpass123",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("UpdatePassword", mock.Anything, "test-token", "oldpass123", "newpass123").
+				m.On("UpdatePassword", mock.Anything, int64(123), "oldpass123", "newpass123").
 					Return(nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -228,7 +227,7 @@ func TestUserHandlers_UpdatePassword(t *testing.T) {
 				NewPassword: "newpass123",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("UpdatePassword", mock.Anything, "test-token", "wrongpass", "newpass123").
+				m.On("UpdatePassword", mock.Anything, int64(123), "wrongpass", "newpass123").
 					Return(customerrors.ErrInvalidCredentials)
 			},
 			expectedStatus: http.StatusUnauthorized,

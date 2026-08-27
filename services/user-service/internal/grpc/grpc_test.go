@@ -3,221 +3,195 @@ package grpc
 import (
 	"context"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	userauth "github.com/zxCroshka/ecommerce/services/user-service/internal/auth"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/lib/jwt"
 	customerrors "github.com/zxCroshka/ecommerce/services/user-service/internal/repository/custom_errors"
-	userservicrev1 "github.com/zxCroshka/ecommerce/shared/userservice/gen/go"
+	userservicev1 "github.com/zxCroshka/ecommerce/shared/userservice/gen/go"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-type MockUserService struct {
-	mock.Mock
+type userServiceStub struct {
+	registerFn       func(context.Context, string, string, string) error
+	loginFn          func(context.Context, string, string) (*jwt.TokenPair, error)
+	refreshFn        func(context.Context, string) (*jwt.TokenPair, error)
+	logoutFn         func(context.Context, domain.Identity, string) error
+	updateEmailFn    func(context.Context, int64, string) error
+	updateNameFn     func(context.Context, int64, string) error
+	updatePasswordFn func(context.Context, int64, string, string) error
+	getUserFn        func(context.Context, int64) (domain.User, error)
+	validateTokenFn  func(context.Context, string) (domain.Identity, error)
 }
 
-func (m *MockUserService) ValidateToken(ctx context.Context, token string) (int64, domain.Role, error) {
-	args := m.Called(ctx, token)
-	return args.Get(0).(int64), args.Get(1).(domain.Role), args.Error(2)
+func (s *userServiceStub) Register(ctx context.Context, email, password, name string) error {
+	return s.registerFn(ctx, email, password, name)
 }
 
-func (m *MockUserService) GetUser(ctx context.Context, userID int64) (domain.User, error) {
-	args := m.Called(ctx, userID)
-	return args.Get(0).(domain.User), args.Error(1)
+func (s *userServiceStub) Login(ctx context.Context, email, password string) (*jwt.TokenPair, error) {
+	return s.loginFn(ctx, email, password)
 }
 
-// ==================== ТЕСТЫ ДЛЯ VALIDATE_TOKEN ====================
+func (s *userServiceStub) RefreshTokens(ctx context.Context, token string) (*jwt.TokenPair, error) {
+	return s.refreshFn(ctx, token)
+}
+
+func (s *userServiceStub) Logout(ctx context.Context, identity domain.Identity, token string) error {
+	return s.logoutFn(ctx, identity, token)
+}
+
+func (s *userServiceStub) UpdateEmail(ctx context.Context, userID int64, email string) error {
+	return s.updateEmailFn(ctx, userID, email)
+}
+
+func (s *userServiceStub) UpdateName(ctx context.Context, userID int64, name string) error {
+	return s.updateNameFn(ctx, userID, name)
+}
+
+func (s *userServiceStub) UpdatePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	return s.updatePasswordFn(ctx, userID, oldPassword, newPassword)
+}
+
+func (s *userServiceStub) GetUser(ctx context.Context, userID int64) (domain.User, error) {
+	return s.getUserFn(ctx, userID)
+}
+
+func (s *userServiceStub) ValidateToken(ctx context.Context, token string) (domain.Identity, error) {
+	return s.validateTokenFn(ctx, token)
+}
 
 func TestValidateToken(t *testing.T) {
-	tests := []struct {
-		name        string
-		req         *userservicrev1.ValidateTokenRequest
-		setupMock   func(*MockUserService)
-		expectedRes *userservicrev1.ValidateTokenResponse
-		expectedErr error
-	}{
-		{
-			name: "success - valid token",
-			req:  &userservicrev1.ValidateTokenRequest{Token: "valid-token"},
-			setupMock: func(m *MockUserService) {
-				m.On("ValidateToken", mock.Anything, "valid-token").
-					Return(int64(123), domain.RoleAdmin, nil)
-			},
-			expectedRes: &userservicrev1.ValidateTokenResponse{UserId: 123, Role: "admin"},
-			expectedErr: nil,
+	server := &ServerAPI{usrservice: &userServiceStub{
+		validateTokenFn: func(_ context.Context, token string) (domain.Identity, error) {
+			require.Equal(t, "valid-token", token)
+			return domain.Identity{UserID: 123, Role: domain.RoleAdmin}, nil
 		},
-		{
-			name:        "error - empty token",
-			req:         &userservicrev1.ValidateTokenRequest{Token: ""},
-			setupMock:   func(m *MockUserService) {},
-			expectedRes: nil,
-			expectedErr: status.Error(codes.InvalidArgument, "empty token"),
-		},
-		{
-			name: "error - blacklisted token",
-			req:  &userservicrev1.ValidateTokenRequest{Token: "blacklisted"},
-			setupMock: func(m *MockUserService) {
-				m.On("ValidateToken", mock.Anything, "blacklisted").
-					Return(int64(0), domain.Role(""), customerrors.ErrTokenBlacklisted)
-			},
-			expectedRes: nil,
-			expectedErr: status.Error(codes.Unauthenticated, "token is blacklisted"),
-		},
-	}
+	}}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockService := new(MockUserService)
-			tt.setupMock(mockService)
-
-			server := &ServerAPI{usrservice: mockService}
-			res, err := server.ValidateToken(context.Background(), tt.req)
-
-			if tt.expectedErr != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedErr.Error(), err.Error())
-				assert.Nil(t, res)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedRes, res)
-			}
-
-			mockService.AssertExpectations(t)
-		})
-	}
+	response, err := server.ValidateToken(context.Background(), &userservicev1.ValidateTokenRequest{Token: "valid-token"})
+	require.NoError(t, err)
+	require.Equal(t, int64(123), response.GetUserId())
+	require.Equal(t, "admin", response.GetRole())
 }
 
-// ==================== ТЕСТЫ ДЛЯ GET_USER ====================
-
-func TestGetUser(t *testing.T) {
-	tests := []struct {
-		name        string
-		req         *userservicrev1.GetUserRequest
-		setupMock   func(*MockUserService)
-		expectedRes *userservicrev1.GetUserResponse
-		expectedErr error
-	}{
-		{
-			name: "success - get user",
-			req:  &userservicrev1.GetUserRequest{UserId: 123},
-			setupMock: func(m *MockUserService) {
-				m.On("GetUser", mock.Anything, int64(123)).
-					Return(domain.User{
-						Id:    123,
-						Email: "test@example.com",
-						Name:  "Test User",
-						Role:  domain.RoleCustomer,
-					}, nil)
-			},
-			expectedRes: &userservicrev1.GetUserResponse{
-				Email: "test@example.com",
-				Name:  "Test User",
-				Role:  "customer",
-			},
-			expectedErr: nil,
+func TestValidateTokenMapsBlacklist(t *testing.T) {
+	server := &ServerAPI{usrservice: &userServiceStub{
+		validateTokenFn: func(context.Context, string) (domain.Identity, error) {
+			return domain.Identity{}, customerrors.ErrTokenBlacklisted
 		},
-		{
-			name: "error - user not found",
-			req:  &userservicrev1.GetUserRequest{UserId: 999},
-			setupMock: func(m *MockUserService) {
-				m.On("GetUser", mock.Anything, int64(999)).
-					Return(domain.User{}, customerrors.ErrUserNotFound)
-			},
-			expectedRes: nil,
-			expectedErr: status.Error(codes.NotFound, "user not found"),
-		},
-		{
-			name:        "error - empty user id",
-			req:         &userservicrev1.GetUserRequest{UserId: 0},
-			setupMock:   func(m *MockUserService) {},
-			expectedRes: nil,
-			expectedErr: status.Error(codes.InvalidArgument, "userID is required"),
-		},
-	}
+	}}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockService := new(MockUserService)
-			tt.setupMock(mockService)
-
-			server := &ServerAPI{usrservice: mockService}
-			res, err := server.GetUser(context.Background(), tt.req)
-
-			if tt.expectedErr != nil {
-				assert.Error(t, err)
-				assert.Equal(t, tt.expectedErr.Error(), err.Error())
-				assert.Nil(t, res)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedRes, res)
-			}
-
-			mockService.AssertExpectations(t)
-		})
-	}
+	_, err := server.ValidateToken(context.Background(), &userservicev1.ValidateTokenRequest{Token: "token"})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
 }
 
-// ==================== ТЕСТЫ ДЛЯ ВАЛИДАЦИИ ====================
+func TestPublicAuthMethods(t *testing.T) {
+	pair := &jwt.TokenPair{AccessToken: "access", RefreshToken: "refresh"}
+	server := &ServerAPI{usrservice: &userServiceStub{
+		registerFn: func(_ context.Context, email, password, name string) error {
+			require.Equal(t, "user@example.com", email)
+			require.Equal(t, "password123", password)
+			require.Equal(t, "anonymous user", name)
+			return nil
+		},
+		loginFn: func(_ context.Context, email, password string) (*jwt.TokenPair, error) {
+			require.Equal(t, "user@example.com", email)
+			require.Equal(t, "password123", password)
+			return pair, nil
+		},
+		refreshFn: func(_ context.Context, token string) (*jwt.TokenPair, error) {
+			require.Equal(t, "old-refresh", token)
+			return pair, nil
+		},
+	}}
 
-func TestValidateValidateToken(t *testing.T) {
-	tests := []struct {
-		name      string
-		token     string
-		shouldErr bool
-	}{
-		{"valid token", "some-token", false},
-		{"empty token", "", true},
-		{"whitespace", "   ", true},
-	}
+	_, err := server.Register(context.Background(), &userservicev1.RegisterRequest{
+		Email: "user@example.com", Password: "password123",
+	})
+	require.NoError(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateValidateToken(&userservicrev1.ValidateTokenRequest{Token: tt.token})
-			if tt.shouldErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	loginResponse, err := server.Login(context.Background(), &userservicev1.LoginRequest{
+		Email: "user@example.com", Password: "password123",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "access", loginResponse.GetAccessToken())
+	require.Equal(t, accessExpiresIn, loginResponse.GetExpiresIn())
+
+	refreshResponse, err := server.RefreshTokens(context.Background(), &userservicev1.RefreshTokensRequest{
+		RefreshToken: "old-refresh",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "refresh", refreshResponse.GetRefreshToken())
 }
 
-func TestValidateGetUser(t *testing.T) {
-	tests := []struct {
-		name      string
-		userID    int64
-		shouldErr bool
-	}{
-		{"valid id", 123, false},
-		{"zero id", 0, true},
-		{"negative id", -1, true},
+func TestProtectedMethodsUseContextIdentity(t *testing.T) {
+	identity := domain.Identity{
+		UserID:    42,
+		Role:      domain.RoleCustomer,
+		TokenID:   "access-id",
+		ExpiresAt: time.Now().Add(15 * time.Minute),
 	}
+	ctx := userauth.WithIdentity(context.Background(), identity)
+	server := &ServerAPI{usrservice: &userServiceStub{
+		getUserFn: func(_ context.Context, userID int64) (domain.User, error) {
+			require.Equal(t, identity.UserID, userID)
+			return domain.User{Id: userID, Email: "user@example.com", Name: "User", Role: identity.Role}, nil
+		},
+		updateEmailFn: func(_ context.Context, userID int64, email string) error {
+			require.Equal(t, identity.UserID, userID)
+			require.Equal(t, "new@example.com", email)
+			return nil
+		},
+		updateNameFn: func(_ context.Context, userID int64, name string) error {
+			require.Equal(t, identity.UserID, userID)
+			require.Equal(t, "New Name", name)
+			return nil
+		},
+		updatePasswordFn: func(_ context.Context, userID int64, oldPassword, newPassword string) error {
+			require.Equal(t, identity.UserID, userID)
+			require.Equal(t, "oldpass123", oldPassword)
+			require.Equal(t, "newpass123", newPassword)
+			return nil
+		},
+		logoutFn: func(_ context.Context, actual domain.Identity, refreshToken string) error {
+			require.Equal(t, identity, actual)
+			require.Equal(t, "refresh-token", refreshToken)
+			return nil
+		},
+	}}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateGetUser(&userservicrev1.GetUserRequest{UserId: tt.userID})
-			if tt.shouldErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
+	profile, err := server.GetUser(ctx, &userservicev1.GetUserRequest{})
+	require.NoError(t, err)
+	require.Equal(t, identity.UserID, profile.GetUserId())
+
+	_, err = server.UpdateEmail(ctx, &userservicev1.UpdateEmailRequest{NewEmail: "new@example.com"})
+	require.NoError(t, err)
+	_, err = server.UpdateName(ctx, &userservicev1.UpdateNameRequest{NewName: "New Name"})
+	require.NoError(t, err)
+	_, err = server.UpdatePassword(ctx, &userservicev1.UpdatePasswordRequest{
+		OldPassword: "oldpass123", NewPassword: "newpass123",
+	})
+	require.NoError(t, err)
+	_, err = server.Logout(ctx, &userservicev1.LogoutRequest{RefreshToken: "refresh-token"})
+	require.NoError(t, err)
 }
 
-// ==================== БЕНЧМАРКИ (опционально) ====================
+func TestProtectedMethodRejectsMissingIdentity(t *testing.T) {
+	server := &ServerAPI{usrservice: &userServiceStub{}}
+	_, err := server.GetUser(context.Background(), &userservicev1.GetUserRequest{})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+}
 
-func BenchmarkValidateToken(b *testing.B) {
-	mockService := new(MockUserService)
-	mockService.On("ValidateToken", mock.Anything, "bench-token").
-		Return(int64(123), false, nil)
-
-	server := &ServerAPI{usrservice: mockService}
-	req := &userservicrev1.ValidateTokenRequest{Token: "bench-token"}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = server.ValidateToken(context.Background(), req)
-	}
+func TestValidation(t *testing.T) {
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateValidateToken(nil)))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateRegister(&userservicev1.RegisterRequest{})))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateLogin(&userservicev1.LoginRequest{})))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateRefreshTokens(nil)))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateLogout(nil)))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateUpdateEmail(nil)))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateUpdateName(nil)))
+	require.Equal(t, codes.InvalidArgument, status.Code(ValidateUpdatePassword(nil)))
 }

@@ -32,7 +32,7 @@ func (h *UserHandlers) UpdateEmail(ctx *gin.Context) {
 	const op = "handlers.user.UpdateEmail"
 	log := h.log.With(slog.String("op", op))
 
-	token, exists := ctx.Get("access_token")
+	userID, exists := ctx.Get("user_id")
 	if !exists {
 		_ = ctx.Error(errs.NewUnauthorizedError("unauthorized"))
 		ctx.Abort()
@@ -47,7 +47,7 @@ func (h *UserHandlers) UpdateEmail(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.srv.UpdateEmail(ctx, token.(string), req.NewEmail); err != nil {
+	if err := h.srv.UpdateEmail(ctx, userID.(int64), req.NewEmail); err != nil {
 		if errors.Is(err, customerrors.ErrDuplicateEmail) {
 			log.Error("duplicate email", "email", req.NewEmail)
 			_ = ctx.Error(errs.NewConflictError("email already exists"))
@@ -79,7 +79,7 @@ func (h *UserHandlers) UpdateName(ctx *gin.Context) {
 	const op = "handlers.user.UpdateName"
 	log := h.log.With(slog.String("op", op))
 
-	token, exists := ctx.Get("access_token")
+	userID, exists := ctx.Get("user_id")
 	if !exists {
 		_ = ctx.Error(errs.NewUnauthorizedError("unauthorized"))
 		ctx.Abort()
@@ -94,7 +94,7 @@ func (h *UserHandlers) UpdateName(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.srv.UpdateName(ctx, token.(string), req.NewName); err != nil {
+	if err := h.srv.UpdateName(ctx, userID.(int64), req.NewName); err != nil {
 		if errors.Is(err, customerrors.ErrInvalidToken) {
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid token"))
 			ctx.Abort()
@@ -121,7 +121,7 @@ func (h *UserHandlers) UpdatePassword(ctx *gin.Context) {
 	const op = "handlers.user.UpdatePassword"
 	log := h.log.With(slog.String("op", op))
 
-	token, exists := ctx.Get("access_token")
+	userID, exists := ctx.Get("user_id")
 	if !exists {
 		_ = ctx.Error(errs.NewUnauthorizedError("unauthorized"))
 		ctx.Abort()
@@ -136,7 +136,7 @@ func (h *UserHandlers) UpdatePassword(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.srv.UpdatePassword(ctx, token.(string), req.OldPassword, req.NewPassword); err != nil {
+	if err := h.srv.UpdatePassword(ctx, userID.(int64), req.OldPassword, req.NewPassword); err != nil {
 		if errors.Is(err, customerrors.ErrInvalidCredentials) {
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid old password"))
 			ctx.Abort()

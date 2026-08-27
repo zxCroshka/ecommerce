@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
 	errs "github.com/zxCroshka/ecommerce/services/user-service/internal/handlers/err"
 	customerrors "github.com/zxCroshka/ecommerce/services/user-service/internal/repository/custom_errors"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/service"
@@ -157,15 +158,17 @@ func (h *AuthHandlers) Logout(ctx *gin.Context) {
 	const op = "handlers.auth.Logout"
 	log := h.log.With(slog.String("op", op))
 
-	accessToken := ctx.GetHeader("Authorization")
-	if accessToken == "" {
-		_ = ctx.Error(errs.NewBadRequestError("authorization header is required"))
+	identityValue, exists := ctx.Get("identity")
+	if !exists {
+		_ = ctx.Error(errs.NewUnauthorizedError("unauthorized"))
 		ctx.Abort()
 		return
 	}
-
-	if len(accessToken) > 7 && accessToken[:7] == "Bearer " {
-		accessToken = accessToken[7:]
+	identity, ok := identityValue.(domain.Identity)
+	if !ok {
+		_ = ctx.Error(errs.NewUnauthorizedError("unauthorized"))
+		ctx.Abort()
+		return
 	}
 
 	var req LogoutRequest
@@ -176,7 +179,7 @@ func (h *AuthHandlers) Logout(ctx *gin.Context) {
 		return
 	}
 
-	if err := h.srv.Logout(ctx, accessToken, req.RefreshToken); err != nil {
+	if err := h.srv.Logout(ctx, identity, req.RefreshToken); err != nil {
 		if errors.Is(err, customerrors.ErrInvalidToken) {
 			log.Error("invalid token during logout")
 			_ = ctx.Error(errs.NewUnauthorizedError("invalid token"))

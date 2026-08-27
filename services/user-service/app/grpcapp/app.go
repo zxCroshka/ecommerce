@@ -20,7 +20,10 @@ func New(
 	userservice usergrpc.UserService,
 	port int,
 ) *App {
-	gRPCServer := grpc.NewServer()
+	interceptor := usergrpc.NewAuthInterceptor(userservice)
+	gRPCServer := grpc.NewServer(
+		grpc.UnaryInterceptor(interceptor.UnaryInterceptor()),
+	)
 
 	usergrpc.RegisterServerAPI(gRPCServer, userservice)
 	return &App{

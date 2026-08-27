@@ -20,6 +20,16 @@ type User struct {
 	CreatedAt time.Time
 }
 
+// Identity contains authentication data that has already been verified by the
+// transport layer. Services use it for authorization and session revocation
+// without depending on a raw access token.
+type Identity struct {
+	UserID    int64
+	Role      Role
+	TokenID   string
+	ExpiresAt time.Time
+}
+
 func New(id int64,
 	email string,
 	passHash []byte,

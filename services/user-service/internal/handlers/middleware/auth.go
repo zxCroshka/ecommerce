@@ -40,7 +40,7 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 
 		token := strings.TrimSpace(parts[1])
 
-		userID, role, err := m.userService.ValidateToken(c.Request.Context(), token)
+		identity, err := m.userService.ValidateToken(c.Request.Context(), token)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid or expired token",
@@ -49,9 +49,9 @@ func (m *AuthMiddleware) AuthRequired() gin.HandlerFunc {
 			return
 		}
 
-		c.Set("user_id", userID)
-		c.Set("role", role)
-		c.Set("access_token", token)
+		c.Set("identity", identity)
+		c.Set("user_id", identity.UserID)
+		c.Set("role", identity.Role)
 
 		c.Next()
 	}

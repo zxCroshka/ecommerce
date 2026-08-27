@@ -1,21 +1,30 @@
 syntax = "proto3";
 
-
 package userservice;
 
-
 option go_package = "github.com/zxCroshka/ecommerce/shared/userservice/gen/go;userservicev1";
-//
+
 service User {
-	//
+	// Internal token validation used by trusted services and the gateway.
 	rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
-	//
+
+	// Protected profile operations. The caller identity is supplied by the
+	// authentication interceptor, never by a request field.
 	rpc GetUser(GetUserRequest) returns (GetUserResponse);
+	rpc UpdateEmail(UpdateEmailRequest) returns (UpdateEmailResponse);
+	rpc UpdateName(UpdateNameRequest) returns (UpdateNameResponse);
+	rpc UpdatePassword(UpdatePasswordRequest) returns (UpdatePasswordResponse);
+
+	// Public authentication operations.
+	rpc Register(RegisterRequest) returns (RegisterResponse);
+	rpc Login(LoginRequest) returns (TokenPairResponse);
+	rpc RefreshTokens(RefreshTokensRequest) returns (TokenPairResponse);
+
+	// Protected session operation.
+	rpc Logout(LogoutRequest) returns (LogoutResponse);
 }
 
-
-
-message ValidateTokenRequest{
+message ValidateTokenRequest {
 	string token = 1;
 }
 
@@ -25,12 +34,63 @@ message ValidateTokenResponse {
 	string role = 2;
 }
 
-message GetUserRequest {
-  int64 user_id = 1;
-}
+message GetUserRequest {}
 
-message GetUserResponse{
+message GetUserResponse {
 	string email = 1;
 	string name = 2;
 	string role = 3;
+	int64 user_id = 4;
 }
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+}
+
+message RegisterResponse {
+}
+
+message LoginRequest {
+	string email = 1;
+	string password = 2;
+}
+
+message TokenPairResponse {
+	string access_token = 1;
+	string refresh_token = 2;
+	string token_type = 3;
+	int64 expires_in = 4;
+}
+
+message RefreshTokensRequest {
+	string refresh_token = 1;
+}
+
+message LogoutRequest {
+	string refresh_token = 1;
+}
+
+message LogoutResponse {}
+
+
+message UpdateEmailRequest {
+	string new_email = 1;
+}
+
+message UpdateEmailResponse {}
+
+message UpdateNameRequest {
+	string new_name = 1;
+}
+
+message UpdateNameResponse {}
+
+
+message UpdatePasswordRequest {
+	string old_password = 1;
+	string new_password = 2;
+}
+
+message UpdatePasswordResponse {}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/handlers/middleware"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/handlers/mocks"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/lib/jwt"
@@ -372,6 +374,12 @@ func TestAuthHandlers_RefreshToken(t *testing.T) {
 }
 
 func TestAuthHandlers_Logout(t *testing.T) {
+	logoutIdentity := domain.Identity{
+		UserID:    123,
+		Role:      domain.RoleCustomer,
+		TokenID:   "access-token-id",
+		ExpiresAt: time.Now().Add(15 * time.Minute),
+	}
 	tests := []struct {
 		name           string
 		authHeader     string
@@ -387,7 +395,7 @@ func TestAuthHandlers_Logout(t *testing.T) {
 				RefreshToken: "refresh-token-456",
 			},
 			setupMock: func(m *mocks.MockUserService) {
-				m.On("Logout", mock.Anything, "access-token-123", "refresh-token-456").
+				m.On("Logout", mock.Anything, logoutIdentity, "refresh-token-456").
 					Return(nil)
 			},
 			expectedStatus: http.StatusOK,
@@ -403,11 +411,11 @@ func TestAuthHandlers_Logout(t *testing.T) {
 				RefreshToken: "refresh-token",
 			},
 			setupMock:      func(m *mocks.MockUserService) {},
-			expectedStatus: http.StatusBadRequest,
+			expectedStatus: http.StatusUnauthorized,
 			checkResponse: func(t *testing.T, response map[string]interface{}) {
 				assert.False(t, response["success"].(bool))
 				errorObj := response["error"].(map[string]interface{})
-				assert.Equal(t, "BAD_REQUEST", errorObj["code"])
+				assert.Equal(t, "UNAUTHORIZED", errorObj["code"])
 			},
 		},
 		{
@@ -433,6 +441,12 @@ func TestAuthHandlers_Logout(t *testing.T) {
 			handler := New(logger, mockService)
 
 			router := setupTestRouter()
+			if tt.authHeader != "" {
+				router.Use(func(ctx *gin.Context) {
+					ctx.Set("identity", logoutIdentity)
+					ctx.Next()
+				})
+			}
 			router.POST("/auth/logout", handler.Logout)
 
 			jsonBody, _ := json.Marshal(tt.requestBody)
