@@ -22,9 +22,7 @@ message ValidateTokenRequest{
 
 message ValidateTokenResponse {
 	int64 user_id = 1;
-	reserved 2;
-	reserved "is_admin";
-	string role = 3;
+	string role = 2;
 }
 
 message GetUserRequest {
@@ -33,8 +31,6 @@ message GetUserRequest {
 
 message GetUserResponse{
 	string email = 1;
-	reserved 2;
-	reserved "is_admin";
-	string name = 3;
-	string role = 4;
+	string name = 2;
+	string role = 3;
 }

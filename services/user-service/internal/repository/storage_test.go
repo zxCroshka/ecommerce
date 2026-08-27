@@ -109,6 +109,9 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		if err1 == nil {
 			assert.Error(t, err2)
 			assert.ErrorIs(t, err2, customerrors.ErrDuplicateEmail)
+			assert.NoError(t, err1)
+		} else {
+			assert.Error(t, err1)
 			assert.ErrorIs(t, err1, customerrors.ErrDuplicateEmail)
 			assert.NoError(t, err2)
 		}

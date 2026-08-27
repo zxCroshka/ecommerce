@@ -6,12 +6,15 @@ import (
 	"net"
 
 	productgrpc "github.com/zxCroshka/ecommerce/services/product-service/internal/grpc"
+	userservicev1 "github.com/zxCroshka/ecommerce/shared/userservice/gen/go"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type App struct {
 	log        *slog.Logger
 	gRPCServer *grpc.Server
+	userConn   *grpc.ClientConn
 	port       int
 }
 
@@ -20,16 +23,34 @@ func New(
 	productservice productgrpc.ProductService,
 	port int,
 	internalToken string,
+	userServiceAddress string,
+	defaultListLimit int,
+	maxListLimit int,
 ) *App {
-	authInterceptor := productgrpc.NewAuthInterceptor(internalToken)
+	userConn, err := grpc.NewClient(
+		userServiceAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		panic(fmt.Errorf("create UserService gRPC client: %w", err))
+	}
+
+	userClient := userservicev1.NewUserClient(userConn)
+	authInterceptor := productgrpc.NewAuthInterceptor(internalToken, userClient)
 	gRPCServer := grpc.NewServer(
 		grpc.UnaryInterceptor(authInterceptor.UnaryInterceptor()),
 	)
 
-	productgrpc.RegisterServerAPI(gRPCServer, productservice)
+	productgrpc.RegisterServerAPI(
+		gRPCServer,
+		productservice,
+		defaultListLimit,
+		maxListLimit,
+	)
 	return &App{
 		log:        log,
 		gRPCServer: gRPCServer,
+		userConn:   userConn,
 		port:       port,
 	}
 }
@@ -60,4 +81,7 @@ func (a *App) Stop() {
 	const op = "grpcapp.Stop"
 	a.log.With(slog.String("op", op)).Info("stopping gRPC server ", slog.Int("port", a.port))
 	a.gRPCServer.GracefulStop()
+	if err := a.userConn.Close(); err != nil {
+		a.log.Error("failed to close UserService gRPC connection", slog.String("error", err.Error()))
+	}
 }

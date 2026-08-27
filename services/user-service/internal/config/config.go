@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -17,6 +19,7 @@ type Config struct {
 	KafkaUI  KafkaUIConfig  `mapstructure:"kafka_ui"`
 	JWT      JWTConfig      `mapstructure:"jwt"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
+	Pprof    PprofConfig    `mapstructure:"pprof"`
 }
 
 type ServiceConfig struct {
@@ -34,9 +37,8 @@ func (h HTTPConfig) Address() string {
 }
 
 type GRPCConfig struct {
-	Host string        `mapstructure:"host"`
-	Port int           `mapstructure:"port"`
-	TTL  time.Duration `mapstructure:"ttl"`
+	Host string `mapstructure:"host"`
+	Port int    `mapstructure:"port"`
 }
 
 func (g GRPCConfig) Address() string {
@@ -98,30 +100,35 @@ type LoggingConfig struct {
 	Format string `mapstructure:"format"`
 }
 
+type PprofConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+}
+
 func LoadConfig(configPath string) (*Config, error) {
-	viper.SetConfigFile(configPath)
-	viper.SetConfigType("yaml")
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("yaml")
+	v.SetEnvPrefix("APP")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
 
-	viper.AutomaticEnv()
-	viper.SetEnvPrefix("APP")
+	_ = v.BindEnv("postgres.password", "APP_POSTGRES_PASSWORD")
+	_ = v.BindEnv("redis.password", "APP_REDIS_PASSWORD")
+	_ = v.BindEnv("kafka.brokers", "APP_KAFKA_BROKERS")
+	_ = v.BindEnv("jwt.secret", "APP_JWT_SECRET")
 
-	_ = viper.BindEnv("postgres.password", "APP_POSTGRES_PASSWORD")
-	_ = viper.BindEnv("redis.password", "APP_REDIS_PASSWORD")
-	_ = viper.BindEnv("kafka.brokers", "APP_KAFKA_BROKERS")
-	_ = viper.BindEnv("jwt.secret", "APP_JWT_SECRET")
-
-	viper.SetDefault("jwt.secret", "change-me-in-production")
-	viper.SetDefault("jwt.access_ttl", "15m")
-	viper.SetDefault("jwt.refresh_ttl", "168h")
-	viper.SetDefault("logging.level", "info")
-	viper.SetDefault("logging.format", "json")
-
-	if err := viper.ReadInConfig(); err != nil {
+	v.SetDefault("jwt.secret", "change-me-in-production")
+	v.SetDefault("jwt.access_ttl", "15m")
+	v.SetDefault("jwt.refresh_ttl", "168h")
+	v.SetDefault("logging.level", "info")
+	v.SetDefault("logging.format", "json")
+	v.SetDefault("pprof.enabled", false)
+	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
 	var config Config
-	if err := viper.Unmarshal(&config); err != nil {
+	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
@@ -157,6 +164,13 @@ func (c *Config) Validate() error {
 	}
 	if c.GRPC.Port <= 0 || c.GRPC.Port > 65535 {
 		return fmt.Errorf("grpc.port must be between 1 and 65535")
+	}
+	if c.Logging.Format != "json" && c.Logging.Format != "text" {
+		return fmt.Errorf("logging.format must be json or text")
+	}
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(c.Logging.Level)); err != nil {
+		return fmt.Errorf("logging.level is invalid: %w", err)
 	}
 
 	return nil

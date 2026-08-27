@@ -9,19 +9,23 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/domain"
+	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/customerrors"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/postgres/db"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/postgres/product"
+	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/postgres/reservations"
 )
 
 type Storage struct {
-	pool     *pgxpool.Pool
-	products *product.Storage
+	pool         *pgxpool.Pool
+	products     *product.Storage
+	reservations *reservations.Storage
 }
 
 func NewForTests(ctx context.Context, pool *pgxpool.Pool) (*Storage, error) {
 	return &Storage{
-		pool:     pool,
-		products: product.New(pool),
+		pool:         pool,
+		products:     product.New(pool),
+		reservations: reservations.New(pool),
 	}, nil
 }
 
@@ -48,15 +52,41 @@ func New(ctx context.Context, storageURL string) (*Storage, error) {
 	}
 	slog.Info("Database connection established successfully")
 	return &Storage{
-		pool:     pool,
-		products: product.New(pool),
+		pool:         pool,
+		products:     product.New(pool),
+		reservations: reservations.New(pool),
 	}, nil
 }
 
-func (s *Storage) ReserveStockTX(ctx context.Context, productID int64, quantity int64) (int64, error) {
+func (s *Storage) ReserveStockTX(ctx context.Context, reservationID string, productID int64, quantity int64) (int64, bool, error) {
 	var newStock int64
+	applied := true
 	err := db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
 		products := s.products.WithTX(tx)
+		reservations := s.reservations.WithTX(tx)
+		inserted, err := reservations.Insert(ctx, reservationID, productID, quantity)
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			reservation, err := reservations.GetForUpdate(
+				ctx, reservationID, productID,
+			)
+			if err != nil {
+				return err
+			}
+
+			if reservation.GetQuantity() != quantity {
+				return customerrors.ErrReservationConflict
+			}
+
+			if reservation.GetStatus() != domain.StatusReserved {
+				return customerrors.ErrReservationConflict
+			}
+
+			applied = false
+			return nil
+		}
 		stock, err := products.ReserveStock(ctx, productID, quantity)
 		if err != nil {
 			return err
@@ -64,21 +94,65 @@ func (s *Storage) ReserveStockTX(ctx context.Context, productID int64, quantity 
 		newStock = stock
 		return nil
 	})
-	return newStock, err
+	return newStock, applied, err
 }
 
-func (s *Storage) ReleaseStockTX(ctx context.Context, productID int64, quantity int64) (int64, error) {
+func (s *Storage) ReleaseStockTX(
+	ctx context.Context,
+	reservationID string,
+	productID int64,
+) (int64, bool, error) {
 	var newStock int64
+	var applied bool
+
 	err := db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
 		products := s.products.WithTX(tx)
-		stock, err := products.ReleaseStock(ctx, productID, quantity)
+		reservations := s.reservations.WithTX(tx)
+
+		reservation, err := reservations.GetForUpdate(
+			ctx,
+			reservationID,
+			productID,
+		)
 		if err != nil {
 			return err
 		}
+
+		if reservation.GetStatus() == domain.StatusReleased {
+			return nil
+		}
+
+		if reservation.GetStatus() != domain.StatusReserved {
+			return customerrors.ErrReservationConflict
+		}
+
+		stock, err := products.ReleaseStock(
+			ctx,
+			productID,
+			reservation.GetQuantity(),
+		)
+		if err != nil {
+			return err
+		}
+
+		marked, err := reservations.MarkReleased(
+			ctx,
+			reservationID,
+			productID,
+		)
+		if err != nil {
+			return err
+		}
+		if !marked {
+			return customerrors.ErrReservationConflict
+		}
+
 		newStock = stock
+		applied = true
 		return nil
 	})
-	return newStock, err
+
+	return newStock, applied, err
 }
 
 func (s *Storage) SaveProduct(

@@ -57,8 +57,6 @@ const (
 	SortByCreatedAt SortField = "created_at"
 )
 
-// ProductPatch is the only set of fields that may be changed by the API.
-// Using a typed patch prevents request data from becoming SQL identifiers.
 type ProductPatch struct {
 	Name        *string
 	Description *string

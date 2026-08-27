@@ -2,24 +2,30 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Service    ServiceConfig    `mapstructure:"service"`
-	HTTP       HTTPConfig       `mapstructure:"http"`
-	GRPC       GRPCConfig       `mapstructure:"grpc"`
-	Postgres   PostgresConfig   `mapstructure:"postgres"`
-	Redis      RedisConfig      `mapstructure:"redis"`
-	Kafka      KafkaConfig      `mapstructure:"kafka"`
-	Logging    LoggingConfig    `mapstructure:"logging"`
-	Pagination PaginationConfig `mapstructure:"pagination"`
-	Jwt        JwtConfig        `mapstructure:"jwt"`
+	Service     ServiceConfig     `mapstructure:"service"`
+	HTTP        HTTPConfig        `mapstructure:"http"`
+	GRPC        GRPCConfig        `mapstructure:"grpc"`
+	Postgres    PostgresConfig    `mapstructure:"postgres"`
+	Redis       RedisConfig       `mapstructure:"redis"`
+	Kafka       KafkaConfig       `mapstructure:"kafka"`
+	Logging     LoggingConfig     `mapstructure:"logging"`
+	Pagination  PaginationConfig  `mapstructure:"pagination"`
+	Jwt         JwtConfig         `mapstructure:"jwt"`
+	UserService UserServiceConfig `mapstructure:"user_service"`
 }
 type JwtConfig struct {
 	Secret string `mapstructure:"secret"`
+}
+
+type UserServiceConfig struct {
+	Address string `mapstructure:"address"`
 }
 
 type ServiceConfig struct {
@@ -37,10 +43,9 @@ func (h HTTPConfig) Address() string {
 }
 
 type GRPCConfig struct {
-	Host          string        `mapstructure:"host"`
-	Port          int           `mapstructure:"port"`
-	Ttl           time.Duration `mapstructure:"ttl"`
-	InternalToken string        `mapstructure:"internal_token"`
+	Host          string `mapstructure:"host"`
+	Port          int    `mapstructure:"port"`
+	InternalToken string `mapstructure:"internal_token"`
 }
 
 func (g GRPCConfig) Address() string {
@@ -104,30 +109,32 @@ type PaginationConfig struct {
 }
 
 func LoadConfig(configPath string) (*Config, error) {
-	viper.SetConfigFile(configPath)
-	viper.SetConfigType("yaml")
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("yaml")
+	v.SetEnvPrefix("APP")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
 
-	viper.AutomaticEnv()
-	viper.SetEnvPrefix("APP")
+	_ = v.BindEnv("postgres.password", "APP_POSTGRES_PASSWORD")
+	_ = v.BindEnv("redis.password", "APP_REDIS_PASSWORD")
+	_ = v.BindEnv("kafka.brokers", "APP_KAFKA_BROKERS")
+	_ = v.BindEnv("grpc.internal_token", "APP_GRPC_INTERNAL_TOKEN")
+	_ = v.BindEnv("user_service.address", "APP_USER_SERVICE_ADDRESS")
 
-	_ = viper.BindEnv("postgres.password", "APP_POSTGRES_PASSWORD")
-	_ = viper.BindEnv("redis.password", "APP_REDIS_PASSWORD")
-	_ = viper.BindEnv("kafka.brokers", "APP_KAFKA_BROKERS")
-	_ = viper.BindEnv("grpc.internal_token", "APP_GRPC_INTERNAL_TOKEN")
+	v.SetDefault("redis.ttl.product_cache", "5m")
+	v.SetDefault("redis.ttl.products_list_cache", "5m")
+	v.SetDefault("pagination.default_limit", 20)
+	v.SetDefault("pagination.max_limit", 100)
+	v.SetDefault("logging.level", "info")
+	v.SetDefault("logging.format", "json")
 
-	viper.SetDefault("redis.ttl.product_cache", "5m")
-	viper.SetDefault("redis.ttl.products_list_cache", "5m")
-	viper.SetDefault("pagination.default_limit", 20)
-	viper.SetDefault("pagination.max_limit", 100)
-	viper.SetDefault("logging.level", "info")
-	viper.SetDefault("logging.format", "json")
-
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
 	var config Config
-	if err := viper.Unmarshal(&config); err != nil {
+	if err := v.Unmarshal(&config); err != nil {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 
@@ -189,6 +196,9 @@ func (c *Config) Validate() error {
 	}
 	if c.GRPC.InternalToken == "" {
 		return fmt.Errorf("grpc.internal_token is required")
+	}
+	if c.UserService.Address == "" {
+		return fmt.Errorf("user_service.address is required")
 	}
 
 	return nil

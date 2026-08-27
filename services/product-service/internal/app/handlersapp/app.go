@@ -21,13 +21,13 @@ func New(
 	log *slog.Logger,
 	productService *service.ProductService,
 	port int,
-	jwtSecret string,  // ← добавляем
+	jwtSecret string, // ← добавляем
 ) *App {
 	productHandler := product.New(log, productService)
 	errorMiddleware := middleware.NewErrorMiddleware()
-	authMiddleware := middleware.NewAuthMiddleware(log, jwtSecret)  // ← создаём
-	router := handlers.NewRouter(productHandler, errorMiddleware, authMiddleware)  // ← передаём
-	
+	authMiddleware := middleware.NewAuthMiddleware(log, jwtSecret)                // ← создаём
+	router := handlers.NewRouter(productHandler, errorMiddleware, authMiddleware) // ← передаём
+
 	return &App{
 		log:    log,
 		router: router,

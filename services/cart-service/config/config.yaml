@@ -3,7 +3,7 @@ service:
   environment: "local"
 
 grpc:
-  port: 9092
+  port: 9093
 
 product_service:
   address: "127.0.0.1:9091"

@@ -23,10 +23,12 @@ func New(
 	log *slog.Logger,
 	grpcPort int,
 	grpcInternalToken string,
+	userServiceAddress string,
+	defaultListLimit int,
+	maxListLimit int,
 	handlerPort int,
 	producer *kaf.Producer,
 	storageURL string,
-	tokenTTL time.Duration,
 	redisHost string,
 	redisPort int,
 	redisPassword string,
@@ -53,7 +55,15 @@ func New(
 		panic(err)
 	}
 	productService := service.New(log, storage, redisClient, producer)
-	grpcApp := grpcapp.New(log, productService, grpcPort, grpcInternalToken)
+	grpcApp := grpcapp.New(
+		log,
+		productService,
+		grpcPort,
+		grpcInternalToken,
+		userServiceAddress,
+		defaultListLimit,
+		maxListLimit,
+	)
 	handlersApp := handlersapp.New(log, productService, handlerPort, jwtSecret)
 	return &App{
 		GRPCSrv:    grpcApp,

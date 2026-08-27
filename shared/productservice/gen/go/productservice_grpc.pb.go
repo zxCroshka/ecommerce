@@ -19,16 +19,27 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Products_GetProduct_FullMethodName   = "/productservice.Products/GetProduct"
-	Products_ReserveStock_FullMethodName = "/productservice.Products/ReserveStock"
-	Products_ReleaseStock_FullMethodName = "/productservice.Products/ReleaseStock"
+	Products_GetProduct_FullMethodName          = "/productservice.Products/GetProduct"
+	Products_ListProducts_FullMethodName        = "/productservice.Products/ListProducts"
+	Products_CreateProduct_FullMethodName       = "/productservice.Products/CreateProduct"
+	Products_UpdateProductFields_FullMethodName = "/productservice.Products/UpdateProductFields"
+	Products_SoftDelete_FullMethodName          = "/productservice.Products/SoftDelete"
+	Products_ReserveStock_FullMethodName        = "/productservice.Products/ReserveStock"
+	Products_ReleaseStock_FullMethodName        = "/productservice.Products/ReleaseStock"
 )
 
 // ProductsClient is the client API for Products service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ProductsClient interface {
+	// Public catalog operations.
 	GetProduct(ctx context.Context, in *GetProductRequest, opts ...grpc.CallOption) (*GetProductResponse, error)
+	ListProducts(ctx context.Context, in *ListProductsRequest, opts ...grpc.CallOption) (*ListProductsResponse, error)
+	// Administrator operations.
+	CreateProduct(ctx context.Context, in *CreateProductRequest, opts ...grpc.CallOption) (*CreateProductResponse, error)
+	UpdateProductFields(ctx context.Context, in *UpdateProductFieldsRequest, opts ...grpc.CallOption) (*UpdateProductFieldsResponse, error)
+	SoftDelete(ctx context.Context, in *SoftDeleteRequest, opts ...grpc.CallOption) (*SoftDeleteResponse, error)
+	// Internal stock operations. They must be protected by service-to-service auth.
 	ReserveStock(ctx context.Context, in *ReserveStockRequest, opts ...grpc.CallOption) (*ReserveStockResponse, error)
 	ReleaseStock(ctx context.Context, in *ReleaseStockRequest, opts ...grpc.CallOption) (*ReleaseStockResponse, error)
 }
@@ -45,6 +56,46 @@ func (c *productsClient) GetProduct(ctx context.Context, in *GetProductRequest, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetProductResponse)
 	err := c.cc.Invoke(ctx, Products_GetProduct_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *productsClient) ListProducts(ctx context.Context, in *ListProductsRequest, opts ...grpc.CallOption) (*ListProductsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProductsResponse)
+	err := c.cc.Invoke(ctx, Products_ListProducts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *productsClient) CreateProduct(ctx context.Context, in *CreateProductRequest, opts ...grpc.CallOption) (*CreateProductResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateProductResponse)
+	err := c.cc.Invoke(ctx, Products_CreateProduct_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *productsClient) UpdateProductFields(ctx context.Context, in *UpdateProductFieldsRequest, opts ...grpc.CallOption) (*UpdateProductFieldsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateProductFieldsResponse)
+	err := c.cc.Invoke(ctx, Products_UpdateProductFields_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *productsClient) SoftDelete(ctx context.Context, in *SoftDeleteRequest, opts ...grpc.CallOption) (*SoftDeleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SoftDeleteResponse)
+	err := c.cc.Invoke(ctx, Products_SoftDelete_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +126,14 @@ func (c *productsClient) ReleaseStock(ctx context.Context, in *ReleaseStockReque
 // All implementations must embed UnimplementedProductsServer
 // for forward compatibility.
 type ProductsServer interface {
+	// Public catalog operations.
 	GetProduct(context.Context, *GetProductRequest) (*GetProductResponse, error)
+	ListProducts(context.Context, *ListProductsRequest) (*ListProductsResponse, error)
+	// Administrator operations.
+	CreateProduct(context.Context, *CreateProductRequest) (*CreateProductResponse, error)
+	UpdateProductFields(context.Context, *UpdateProductFieldsRequest) (*UpdateProductFieldsResponse, error)
+	SoftDelete(context.Context, *SoftDeleteRequest) (*SoftDeleteResponse, error)
+	// Internal stock operations. They must be protected by service-to-service auth.
 	ReserveStock(context.Context, *ReserveStockRequest) (*ReserveStockResponse, error)
 	ReleaseStock(context.Context, *ReleaseStockRequest) (*ReleaseStockResponse, error)
 	mustEmbedUnimplementedProductsServer()
@@ -90,6 +148,18 @@ type UnimplementedProductsServer struct{}
 
 func (UnimplementedProductsServer) GetProduct(context.Context, *GetProductRequest) (*GetProductResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetProduct not implemented")
+}
+func (UnimplementedProductsServer) ListProducts(context.Context, *ListProductsRequest) (*ListProductsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProducts not implemented")
+}
+func (UnimplementedProductsServer) CreateProduct(context.Context, *CreateProductRequest) (*CreateProductResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateProduct not implemented")
+}
+func (UnimplementedProductsServer) UpdateProductFields(context.Context, *UpdateProductFieldsRequest) (*UpdateProductFieldsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateProductFields not implemented")
+}
+func (UnimplementedProductsServer) SoftDelete(context.Context, *SoftDeleteRequest) (*SoftDeleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SoftDelete not implemented")
 }
 func (UnimplementedProductsServer) ReserveStock(context.Context, *ReserveStockRequest) (*ReserveStockResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReserveStock not implemented")
@@ -132,6 +202,78 @@ func _Products_GetProduct_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProductsServer).GetProduct(ctx, req.(*GetProductRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Products_ListProducts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProductsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProductsServer).ListProducts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Products_ListProducts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProductsServer).ListProducts(ctx, req.(*ListProductsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Products_CreateProduct_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateProductRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProductsServer).CreateProduct(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Products_CreateProduct_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProductsServer).CreateProduct(ctx, req.(*CreateProductRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Products_UpdateProductFields_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateProductFieldsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProductsServer).UpdateProductFields(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Products_UpdateProductFields_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProductsServer).UpdateProductFields(ctx, req.(*UpdateProductFieldsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Products_SoftDelete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SoftDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProductsServer).SoftDelete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Products_SoftDelete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProductsServer).SoftDelete(ctx, req.(*SoftDeleteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -182,6 +324,22 @@ var Products_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetProduct",
 			Handler:    _Products_GetProduct_Handler,
+		},
+		{
+			MethodName: "ListProducts",
+			Handler:    _Products_ListProducts_Handler,
+		},
+		{
+			MethodName: "CreateProduct",
+			Handler:    _Products_CreateProduct_Handler,
+		},
+		{
+			MethodName: "UpdateProductFields",
+			Handler:    _Products_UpdateProductFields_Handler,
+		},
+		{
+			MethodName: "SoftDelete",
+			Handler:    _Products_SoftDelete_Handler,
 		},
 		{
 			MethodName: "ReserveStock",

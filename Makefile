@@ -1,4 +1,4 @@
-.PHONY: lint lint-fix migrate-create-userservice migrate-create-productservice test test-unit test-integration test-coverage build run lint-errcheck migrate-up test-grpc test-http generate-proto-userservice generate-proto-productservice generate-proto-cartservice run-productservice run-userservice build-productservice build-userservice migrate-up-userservice migrate-down-userservice migrate-up-productservice migrate-down-productservice test-postgres run-only
+.PHONY: lint lint-fix migrate-create-userservice migrate-create-productservice test test-unit test-integration test-integration-product test-coverage build run lint-errcheck migrate-up test-grpc test-http generate-proto-userservice generate-proto-productservice generate-proto-cartservice run-productservice run-userservice build-productservice build-userservice migrate-up-userservice migrate-down-userservice migrate-up-productservice migrate-down-productservice test-postgres run-only
 
 lint:
 	golangci-lint run ./... --build-tags=integration
@@ -33,6 +33,9 @@ test-unit:
 
 test-integration:
 	go test ./internal/repository/... -v -tags=integration
+
+test-integration-product:
+	go test -tags=integration -count=1 -v ./services/product-service/internal/repository/postgres
 
 test-coverage:
 	go test ./... -coverprofile=coverage.out

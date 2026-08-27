@@ -43,8 +43,8 @@ type ProductManager interface {
 	ListProducts(ctx context.Context, req domain.ProductListRequest) ([]*domain.Product, int64, error)
 	SoftDelete(ctx context.Context, productID int64) error
 	GetProduct(ctx context.Context, productID int64) (*domain.Product, error)
-	ReserveStockTX(ctx context.Context, productID int64, quantity int64) (int64, error)
-	ReleaseStockTX(ctx context.Context, productID int64, quantity int64) (int64, error)
+	ReserveStockTX(ctx context.Context, reservationID string, productID int64, quantity int64) (int64, bool, error)
+	ReleaseStockTX(ctx context.Context, reservationID string, productID int64) (int64, bool, error)
 }
 
 type CacheManager interface {
@@ -320,7 +320,7 @@ func (s *ProductService) SoftDelete(ctx context.Context, productID int64, isAdmi
 
 	if !product.IsActive {
 		log.Warn("product already inactive")
-		return fmt.Errorf("%s: product already deleted", op)
+		return fmt.Errorf("%s: product already deleted: %w", op, customerrors.ErrProductInactive)
 	}
 
 	if err := s.productManager.SoftDelete(ctx, productID); err != nil {
@@ -348,7 +348,7 @@ func (s *ProductService) SoftDelete(ctx context.Context, productID int64, isAdmi
 	return nil
 }
 
-func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quantity int64) error {
+func (s *ProductService) ReserveStock(ctx context.Context, reservationID string, productID int64, quantity int64) error {
 	const op = "service.ReserveStock"
 	log := s.log.With(slog.String("op", op), slog.Int64("product_id", productID), slog.Int64("quantity", quantity))
 
@@ -357,7 +357,7 @@ func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quan
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	newStock, err := s.productManager.ReserveStockTX(ctx, productID, quantity)
+	newStock, applied, err := s.productManager.ReserveStockTX(ctx, reservationID, productID, quantity)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrInsufficientStock) {
 			log.Warn("insufficient stock", "requested", quantity)
@@ -372,6 +372,9 @@ func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quan
 		}
 		log.Error("failed to reserve stock", "error", err)
 		return fmt.Errorf("%s: %w", op, err)
+	}
+	if !applied {
+		return nil
 	}
 
 	go func() {
@@ -395,16 +398,11 @@ func (s *ProductService) ReserveStock(ctx context.Context, productID int64, quan
 	return nil
 }
 
-func (s *ProductService) ReleaseStock(ctx context.Context, productID int64, quantity int64) error {
+func (s *ProductService) ReleaseStock(ctx context.Context, reservationID string, productID int64) error {
 	const op = "service.ReleaseStock"
-	log := s.log.With(slog.String("op", op), slog.Int64("product_id", productID), slog.Int64("quantity", quantity))
+	log := s.log.With(slog.String("op", op), slog.Int64("product_id", productID))
 
-	if err := s.validateQuantity(quantity); err != nil {
-		log.Warn("invalid quantity", "error", err)
-		return fmt.Errorf("%s: %w", op, err)
-	}
-
-	newStock, err := s.productManager.ReleaseStockTX(ctx, productID, quantity)
+	newStock, applied, err := s.productManager.ReleaseStockTX(ctx, reservationID, productID)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrProductNotFound) {
 			log.Warn("product not found")
@@ -414,6 +412,9 @@ func (s *ProductService) ReleaseStock(ctx context.Context, productID int64, quan
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
+	if !applied {
+		return nil
+	}
 	go func() {
 		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
 			s.log.Error("failed to invalidate product caches", "error", err)
@@ -422,9 +423,8 @@ func (s *ProductService) ReleaseStock(ctx context.Context, productID int64, quan
 
 	go func() {
 		changes := map[string]any{
-			"stock":             newStock,
-			"released_quantity": quantity,
-			"operation":         "release",
+			"stock":     newStock,
+			"operation": "release",
 		}
 		if err := s.producer.ProduceProductUpdated(productID, changes); err != nil {
 			s.log.Error("failed to send kafka event for stock release", "error", err)

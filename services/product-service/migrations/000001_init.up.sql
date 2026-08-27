@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS productservice.products (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_products_category ON productservice.products(category);
-CREATE INDEX idx_products_is_active ON productservice.products(is_active);
+CREATE INDEX IF NOT EXISTS idx_products_category ON productservice.products(category);
+CREATE INDEX IF NOT EXISTS idx_products_is_active ON productservice.products(is_active);

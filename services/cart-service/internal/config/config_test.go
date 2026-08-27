@@ -12,7 +12,7 @@ func TestLoadConfig(t *testing.T) {
 	cfg, err := LoadConfig("../../config/config.yaml")
 	require.NoError(t, err)
 
-	assert.Equal(t, 9092, cfg.GRPC.Port)
+	assert.Equal(t, 9093, cfg.GRPC.Port)
 	assert.Equal(t, "127.0.0.1:9091", cfg.ProductService.Address)
 	assert.Equal(t, 2*time.Second, cfg.ProductService.Timeout)
 	assert.Equal(t, 7*24*time.Hour, cfg.Cart.TTL)
