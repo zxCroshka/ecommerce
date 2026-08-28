@@ -10,18 +10,13 @@ import (
 
 type Config struct {
 	Service     ServiceConfig     `mapstructure:"service"`
-	HTTP        HTTPConfig        `mapstructure:"http"`
 	GRPC        GRPCConfig        `mapstructure:"grpc"`
 	Postgres    PostgresConfig    `mapstructure:"postgres"`
 	Redis       RedisConfig       `mapstructure:"redis"`
 	Kafka       KafkaConfig       `mapstructure:"kafka"`
 	Logging     LoggingConfig     `mapstructure:"logging"`
 	Pagination  PaginationConfig  `mapstructure:"pagination"`
-	Jwt         JwtConfig         `mapstructure:"jwt"`
 	UserService UserServiceConfig `mapstructure:"user_service"`
-}
-type JwtConfig struct {
-	Secret string `mapstructure:"secret"`
 }
 
 type UserServiceConfig struct {
@@ -31,15 +26,6 @@ type UserServiceConfig struct {
 type ServiceConfig struct {
 	Name        string `mapstructure:"name"`
 	Environment string `mapstructure:"environment"`
-}
-
-type HTTPConfig struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
-}
-
-func (h HTTPConfig) Address() string {
-	return fmt.Sprintf("%s:%d", h.Host, h.Port)
 }
 
 type GRPCConfig struct {
@@ -146,7 +132,6 @@ func LoadConfig(configPath string) (*Config, error) {
 }
 
 func (c *Config) Validate() error {
-	// Validate Postgres
 	if c.Postgres.Host == "" {
 		return fmt.Errorf("postgres.host is required")
 	}
@@ -160,7 +145,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("postgres.database is required")
 	}
 
-	// Validate Redis
 	if c.Redis.Host == "" {
 		return fmt.Errorf("redis.host is required")
 	}
@@ -168,7 +152,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("redis.port must be between 1 and 65535")
 	}
 
-	// Validate Kafka
 	if len(c.Kafka.Brokers) == 0 {
 		return fmt.Errorf("kafka.brokers cannot be empty")
 	}
@@ -187,10 +170,6 @@ func (c *Config) Validate() error {
 			c.Pagination.DefaultLimit, c.Pagination.MaxLimit)
 	}
 
-	// Validate HTTP and gRPC ports
-	if c.HTTP.Port <= 0 || c.HTTP.Port > 65535 {
-		return fmt.Errorf("http.port must be between 1 and 65535")
-	}
 	if c.GRPC.Port <= 0 || c.GRPC.Port > 65535 {
 		return fmt.Errorf("grpc.port must be between 1 and 65535")
 	}

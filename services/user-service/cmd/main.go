@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/zxCroshka/ecommerce/services/user-service/app"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/app"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/config"
 	kaf "github.com/zxCroshka/ecommerce/services/user-service/internal/kafka"
 )
@@ -39,9 +39,6 @@ func main() {
 		"starting application",
 		slog.String("service", cfg.Service.Name),
 		slog.String("environment", cfg.Service.Environment),
-		slog.Group("http",
-			slog.String("address", cfg.HTTP.Address()),
-		),
 		slog.Group("grpc",
 			slog.String("address", cfg.GRPC.Address()),
 		),
@@ -74,7 +71,6 @@ func main() {
 		ctx,
 		log,
 		cfg.GRPC.Port,
-		cfg.HTTP.Port,
 		kafkaProducer,
 		postgresURL,
 		cfg.JWT.AccessTTL,

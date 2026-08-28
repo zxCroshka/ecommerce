@@ -20,3 +20,5 @@ coverage.html
 
 # Local configuration
 .env
+
+**/scripts/

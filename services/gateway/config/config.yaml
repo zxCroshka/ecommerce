@@ -1,0 +1,31 @@
+service:
+  name: "ecommerce-api-gateway"
+  environment: "local"
+
+http:
+  host: "0.0.0.0"
+  port: 8085
+  read_timeout: "5s"
+  write_timeout: "10s"
+  idle_timeout: "60s"
+  shutdown_timeout: "10s"
+
+logging:
+  level: "info"
+  format: "json"
+
+user_service:
+  address: "user-service:9090"
+  retry_count: 2
+  timeout: "2s"
+
+product_service:
+  address: "product-service:9091"
+  internal_token: "local-dev-product-service-token-change-me"
+  retry_count: 2
+  timeout: "2s"
+
+cart_service:
+  address: "cart-service:9093"
+  retry_count: 2
+  timeout: "2s"

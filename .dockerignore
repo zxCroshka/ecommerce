@@ -5,3 +5,6 @@
 coverage.out
 coverage.html
 .env
+*.pprof
+*.test
+coverage*
