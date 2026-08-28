@@ -24,6 +24,6 @@ WORKDIR /app
 COPY --from=build /out/service ./service
 COPY services/product-service/config ./config
 
-EXPOSE 8081 9091
+EXPOSE 9091
 
 ENTRYPOINT ["./service"]

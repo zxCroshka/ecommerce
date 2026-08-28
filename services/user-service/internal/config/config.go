@@ -11,7 +11,6 @@ import (
 
 type Config struct {
 	Service  ServiceConfig  `mapstructure:"service"`
-	HTTP     HTTPConfig     `mapstructure:"http"`
 	GRPC     GRPCConfig     `mapstructure:"grpc"`
 	Postgres PostgresConfig `mapstructure:"postgres"`
 	Redis    RedisConfig    `mapstructure:"redis"`
@@ -25,15 +24,6 @@ type Config struct {
 type ServiceConfig struct {
 	Name        string `mapstructure:"name"`
 	Environment string `mapstructure:"environment"`
-}
-
-type HTTPConfig struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
-}
-
-func (h HTTPConfig) Address() string {
-	return fmt.Sprintf("%s:%d", h.Host, h.Port)
 }
 
 type GRPCConfig struct {
@@ -159,9 +149,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("kafka.brokers cannot be empty")
 	}
 
-	if c.HTTP.Port <= 0 || c.HTTP.Port > 65535 {
-		return fmt.Errorf("http.port must be between 1 and 65535")
-	}
 	if c.GRPC.Port <= 0 || c.GRPC.Port > 65535 {
 		return fmt.Errorf("grpc.port must be between 1 and 65535")
 	}

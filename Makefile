@@ -97,4 +97,4 @@ test-grpc:
 	go test ./services/user-service/internal/grpc/... -v
 
 test-http:
-	go test ./services/user-service/internal/handlers/... -v
+	go test ./services/gateway/internal/handlers/... ./services/gateway/internal/middleware/... ./services/gateway/internal/router/... -v

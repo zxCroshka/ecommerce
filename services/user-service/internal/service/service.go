@@ -18,12 +18,12 @@ type UserServiceInterface interface {
 	Register(ctx context.Context, email, password, name string) error
 	Login(ctx context.Context, email, password string) (*jwt.TokenPair, error)
 	RefreshTokens(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
-	Logout(ctx context.Context, accessToken, refreshToken string) error
-	UpdateEmail(ctx context.Context, token, newEmail string) error
-	UpdateName(ctx context.Context, token, newName string) error
-	UpdatePassword(ctx context.Context, token, oldPassword, newPassword string) error
+	Logout(ctx context.Context, identity domain.Identity, refreshToken string) error
+	UpdateEmail(ctx context.Context, userID int64, newEmail string) error
+	UpdateName(ctx context.Context, userID int64, newName string) error
+	UpdatePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error
 	GetUser(ctx context.Context, userID int64) (domain.User, error)
-	ValidateToken(ctx context.Context, token string) (int64, domain.Role, error)
+	ValidateToken(ctx context.Context, token string) (domain.Identity, error)
 }
 
 type UserService struct {
@@ -164,13 +164,9 @@ func (s *UserService) RefreshTokens(ctx context.Context, refreshToken string) (*
 	return newTokenPair, nil
 }
 
-func (s *UserService) Logout(ctx context.Context, accessToken string, refreshToken string) error {
+func (s *UserService) Logout(ctx context.Context, identity domain.Identity, refreshToken string) error {
 	const op = "service.Logout"
-	log := s.log.With(slog.String("op", op))
-
-	accessClaims, err := s.jwtManager.ValidateAccessToken(accessToken)
-	if err != nil {
-		log.Warn("invalid access token", "error", err)
+	if identity.UserID <= 0 || identity.TokenID == "" || identity.ExpiresAt.IsZero() {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
 	}
 
@@ -179,7 +175,7 @@ func (s *UserService) Logout(ctx context.Context, accessToken string, refreshTok
 		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
 	}
 
-	if accessClaims.UserID != refreshClaims.UserID {
+	if identity.UserID != refreshClaims.UserID {
 		return fmt.Errorf("%s: token belongs to different users %w", op, customerrors.ErrInvalidToken)
 	}
 
@@ -187,33 +183,44 @@ func (s *UserService) Logout(ctx context.Context, accessToken string, refreshTok
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	remainingTTL := time.Until(accessClaims.ExpiresAt.Time)
-	if err := s.tknManager.AddToBlacklist(ctx, accessClaims.ID, remainingTTL); err != nil {
+	remainingTTL := time.Until(identity.ExpiresAt)
+	if remainingTTL <= 0 {
+		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
+	}
+	if err := s.tknManager.AddToBlacklist(ctx, identity.TokenID, remainingTTL); err != nil {
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
 
-func (s *UserService) ValidateToken(ctx context.Context, token string) (int64, domain.Role, error) {
+func (s *UserService) ValidateToken(ctx context.Context, token string) (domain.Identity, error) {
 	const op = "service.ValidateToken"
 	log := s.log.With(slog.String("op", op))
 
 	claims, err := s.jwtManager.ValidateAccessToken(token)
 	if err != nil {
 		log.Error("failed to validate token", "error", err)
-		return 0, "", fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
+		return domain.Identity{}, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
+	}
+	if claims.ExpiresAt == nil {
+		return domain.Identity{}, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
 	}
 
 	exists, err := s.tknManager.IsBlacklisted(ctx, claims.ID)
 	if err != nil {
-		return 0, "", fmt.Errorf("%s: %w", op, err)
+		return domain.Identity{}, fmt.Errorf("%s: %w", op, err)
 	}
 	if exists {
 		log.Warn("token is blacklisted", "token_id", claims.ID)
-		return 0, "", fmt.Errorf("%s: %w", op, customerrors.ErrTokenBlacklisted)
+		return domain.Identity{}, fmt.Errorf("%s: %w", op, customerrors.ErrTokenBlacklisted)
 	}
 
-	return claims.UserID, claims.Role, nil
+	return domain.Identity{
+		UserID:    claims.UserID,
+		Role:      claims.Role,
+		TokenID:   claims.ID,
+		ExpiresAt: claims.ExpiresAt.Time,
+	}, nil
 }
 
 func (s *UserService) GetUser(ctx context.Context, userID int64) (domain.User, error) {
@@ -233,13 +240,12 @@ func (s *UserService) GetUser(ctx context.Context, userID int64) (domain.User, e
 
 }
 
-func (s *UserService) UpdateEmail(ctx context.Context, token, newEmail string) error {
+func (s *UserService) UpdateEmail(ctx context.Context, userID int64, newEmail string) error {
 	newEmail = strings.ToLower(strings.TrimSpace(newEmail))
 	const op = "service.UpdateEmail"
 	log := s.log.With(slog.String("op", op))
 
-	tokenClaims, err := s.jwtManager.ValidateAccessToken(token)
-	if err != nil {
+	if userID <= 0 {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
 	}
 
@@ -249,40 +255,39 @@ func (s *UserService) UpdateEmail(ctx context.Context, token, newEmail string) e
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	if existingUser.Id != 0 && existingUser.Id != tokenClaims.UserID {
+	if existingUser.Id != 0 && existingUser.Id != userID {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrDuplicateEmail)
 	}
 
-	if existingUser.Id == tokenClaims.UserID {
+	if existingUser.Id == userID {
 		log.Info("email is the same, skipping update")
 		return nil
 	}
 
-	if err := s.usrManager.UpdateEmail(ctx, tokenClaims.UserID, newEmail); err != nil {
+	if err := s.usrManager.UpdateEmail(ctx, userID, newEmail); err != nil {
 		log.Error("failed to update email", "error", err)
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	log.Info("email updated successfully", "user_id", tokenClaims.UserID)
+	log.Info("email updated successfully", "user_id", userID)
 	return nil
 }
 
-func (s *UserService) UpdateName(ctx context.Context, token, newName string) error {
+func (s *UserService) UpdateName(ctx context.Context, userID int64, newName string) error {
 	const op = "service.UpdateName"
 	log := s.log.With(slog.String("op", op))
 
-	tokenClaims, err := s.jwtManager.ValidateAccessToken(token)
-	if err != nil {
+	if userID <= 0 {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
 	}
-	if err := s.usrManager.UpdateName(ctx, tokenClaims.UserID, newName); err != nil {
+	if err := s.usrManager.UpdateName(ctx, userID, strings.TrimSpace(newName)); err != nil {
 		log.Error("failed to update name")
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }
 
-func (s *UserService) UpdatePassword(ctx context.Context, token string, oldPassword string, newPassword string) error {
+func (s *UserService) UpdatePassword(ctx context.Context, userID int64, oldPassword string, newPassword string) error {
 	const op = "service.UpdatePassword"
 	log := s.log.With(slog.String("op", op))
 	if err := ValidatePassword(newPassword); err != nil {
@@ -292,12 +297,10 @@ func (s *UserService) UpdatePassword(ctx context.Context, token string, oldPassw
 		return fmt.Errorf("%s: %w", op, customerrors.ErrSamePassword)
 	}
 
-	tokenClaims, err := s.jwtManager.ValidateAccessToken(token)
-	if err != nil {
-		log.Error("invalid token", "error", err)
+	if userID <= 0 {
 		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidToken)
 	}
-	user, err := s.usrManager.User(ctx, tokenClaims.Email)
+	user, err := s.usrManager.UserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrUserNotFound) {
 			log.Error("user is not found")

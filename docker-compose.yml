@@ -50,7 +50,7 @@ services:
     networks:
       - ecommerce-network
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      test: [ "CMD", "nc", "-z", "localhost", "2181" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -76,7 +76,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092" ]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -137,7 +137,6 @@ services:
       APP_KAFKA_BROKERS: kafka:29092
       APP_JWT_SECRET: local-dev-secret-key-2024-change-me-in-production
     ports:
-      - "8080:8080"
       - "9090:9090"
       - "3366:3366"
     depends_on:
@@ -160,9 +159,7 @@ services:
       APP_KAFKA_BROKERS: kafka:29092
       APP_USER_SERVICE_ADDRESS: user-service:9090
       APP_GRPC_INTERNAL_TOKEN: local-dev-product-service-token-change-me
-      APP_JWT_SECRET: local-dev-secret-key-2024-change-me-in-production
     ports:
-      - "8081:8081"
       - "9091:9091"
     depends_on:
       migrate-product:
@@ -191,6 +188,27 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+    networks:
+      - ecommerce-network
+    restart: on-failure
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8085:8085"
+    environment:
+      APP_USER_SERVICE_ADDRESS: user-service:9090
+      APP_PRODUCT_SERVICE_ADDRESS: product-service:9091
+      APP_PRODUCT_SERVICE_INTERNAL_TOKEN: local-dev-product-service-token-change-me
+      APP_CART_SERVICE_ADDRESS: cart-service:9093
+    depends_on:
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      cart-service:
+        condition: service_started
     networks:
       - ecommerce-network
     restart: on-failure
