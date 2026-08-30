@@ -23,3 +23,5 @@ coverage*.html
 .env
 
 **/scripts/
+
+docs/PROJECT_AUDIT_RU.md
