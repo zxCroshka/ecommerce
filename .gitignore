@@ -15,8 +15,9 @@ services/user-service/user-service
 
 # Build artifacts
 **/bin/
-coverage.out
-coverage.html
+coverage*.out
+coverage*.html
+*.coverprofile
 
 # Local configuration
 .env
