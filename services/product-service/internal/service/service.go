@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/domain"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/customerrors"
@@ -23,7 +22,6 @@ type ProductService struct {
 	log            *slog.Logger
 	productManager ProductManager
 	cacheManager   CacheManager
-	producer       Producer
 }
 
 type ProductManager interface {
@@ -49,26 +47,24 @@ type ProductManager interface {
 
 type CacheManager interface {
 	SetListProductsCache(ctx context.Context, key string, products []*domain.Product, total int64) error
+	SetListProductsCacheIfGeneration(ctx context.Context, key string, products []*domain.Product, total int64, generation int64) (bool, error)
 	GetListProductsCache(ctx context.Context, key string) ([]*domain.Product, int64, error)
 	InvalidateProductsCache(ctx context.Context, key string) error
 	InvalidateProductsCacheByPattern(ctx context.Context, pattern string) error
 	SetProductCache(ctx context.Context, productID int64, product *domain.Product) error
+	SetProductCacheIfGeneration(ctx context.Context, productID int64, product *domain.Product, generation int64) (bool, error)
 	GetProductCache(ctx context.Context, productID int64) (*domain.Product, error)
 	InvalidateProductCache(ctx context.Context, productID int64) error
 	InvalidateAllProductCache(ctx context.Context) error
+	CacheGeneration(ctx context.Context) (int64, error)
 	BuildListCacheKey(filter domain.ProductFilter, sort domain.SortField, order domain.SortOrder, limit, offset int) string
 }
 
-type Producer interface {
-	ProduceProductUpdated(productID int64, changes map[string]any) error
-}
-
-func New(log *slog.Logger, productManager ProductManager, cacheManager CacheManager, producer Producer) *ProductService {
+func New(log *slog.Logger, productManager ProductManager, cacheManager CacheManager) *ProductService {
 	return &ProductService{
 		log:            log,
 		productManager: productManager,
 		cacheManager:   cacheManager,
-		producer:       producer,
 	}
 }
 
@@ -120,11 +116,9 @@ func (s *ProductService) CreateProduct(
 		return 0, fmt.Errorf("%s: %w", op, err)
 	}
 
-	go func() {
-		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
-			s.log.Error("failed to invalidate cache after create", "error", err)
-		}
-	}()
+	if err := s.cacheManager.InvalidateAllProductCache(ctx); err != nil {
+		log.Error("failed to invalidate cache after create", "error", err)
+	}
 
 	log.Info("product created successfully", "product_id", productID)
 	return productID, nil
@@ -148,7 +142,7 @@ func (s *ProductService) UpdateProductFields(
 		return fmt.Errorf("%s: %w: no fields to update", op, customerrors.ErrInvalidProductData)
 	}
 
-	oldProduct, err := s.productManager.GetProduct(ctx, productID)
+	_, err := s.productManager.GetProduct(ctx, productID)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrProductNotFound) {
 			log.Warn("product not found")
@@ -194,31 +188,8 @@ func (s *ProductService) UpdateProductFields(
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	changes := make(map[string]any)
-	if patch.Price != nil {
-		changes["old_price"] = oldProduct.Price
-		changes["new_price"] = *patch.Price
-	}
-	if patch.Stock != nil {
-		changes["old_stock"] = oldProduct.Stock
-		changes["new_stock"] = *patch.Stock
-	}
-	if patch.IsActive != nil {
-		changes["is_active"] = *patch.IsActive
-	}
-
-	go func() {
-		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
-			s.log.Error("failed to invalidate cache after update", "error", err)
-		}
-	}()
-
-	if len(changes) > 0 {
-		go func() {
-			if err := s.producer.ProduceProductUpdated(productID, changes); err != nil {
-				s.log.Error("failed to send kafka event", "error", err)
-			}
-		}()
+	if err := s.cacheManager.InvalidateAllProductCache(ctx); err != nil {
+		log.Error("failed to invalidate cache after update", "error", err)
 	}
 
 	log.Info("product updated successfully", "product_id", productID)
@@ -244,17 +215,24 @@ func (s *ProductService) ListProducts(ctx context.Context, req domain.ProductLis
 
 	log.Debug("cache miss", "key", cacheKey, "error", err)
 
+	generation, generationErr := s.cacheManager.CacheGeneration(ctx)
+	if generationErr != nil {
+		log.Warn("failed to read cache generation", "error", generationErr)
+	}
+
 	products, total, err := s.productManager.ListProducts(ctx, req)
 	if err != nil {
 		log.Error("failed to list products", "error", err)
 		return nil, 0, fmt.Errorf("%s: %w", op, err)
 	}
 
-	go func() {
-		if err := s.cacheManager.SetListProductsCache(context.Background(), cacheKey, products, total); err != nil {
-			s.log.Error("failed to set list cache", "error", err)
+	if generationErr == nil {
+		if _, err := s.cacheManager.SetListProductsCacheIfGeneration(
+			ctx, cacheKey, products, total, generation,
+		); err != nil {
+			log.Warn("failed to set list cache", "error", err)
 		}
-	}()
+	}
 
 	return products, total, nil
 }
@@ -275,6 +253,11 @@ func (s *ProductService) GetProduct(ctx context.Context, productID int64, isAdmi
 
 	log.Debug("cache miss", "error", err)
 
+	generation, generationErr := s.cacheManager.CacheGeneration(ctx)
+	if generationErr != nil {
+		log.Warn("failed to read cache generation", "error", generationErr)
+	}
+
 	product, err := s.productManager.GetProduct(ctx, productID)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrProductNotFound) {
@@ -290,11 +273,11 @@ func (s *ProductService) GetProduct(ctx context.Context, productID int64, isAdmi
 		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrProductNotFound)
 	}
 
-	go func() {
-		if err := s.cacheManager.SetProductCache(context.Background(), productID, product); err != nil {
-			s.log.Error("failed to set product cache", "error", err)
+	if generationErr == nil {
+		if _, err := s.cacheManager.SetProductCacheIfGeneration(ctx, productID, product, generation); err != nil {
+			log.Warn("failed to set product cache", "error", err)
 		}
-	}()
+	}
 
 	return product, nil
 }
@@ -328,21 +311,9 @@ func (s *ProductService) SoftDelete(ctx context.Context, productID int64, isAdmi
 		return fmt.Errorf("%s: %w", op, err)
 	}
 
-	go func() {
-		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
-			s.log.Error("failed to invalidate cache after delete", "error", err)
-		}
-	}()
-
-	go func() {
-		changes := map[string]any{
-			"is_active":  false,
-			"deleted_at": time.Now().Unix(),
-		}
-		if err := s.producer.ProduceProductUpdated(productID, changes); err != nil {
-			s.log.Error("failed to send kafka event", "error", err)
-		}
-	}()
+	if err := s.cacheManager.InvalidateAllProductCache(ctx); err != nil {
+		log.Error("failed to invalidate cache after delete", "error", err)
+	}
 
 	log.Info("product soft deleted successfully")
 	return nil
@@ -377,22 +348,9 @@ func (s *ProductService) ReserveStock(ctx context.Context, reservationID string,
 		return nil
 	}
 
-	go func() {
-		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
-			s.log.Error("failed to invalidate product caches", "error", err)
-		}
-	}()
-
-	go func() {
-		changes := map[string]any{
-			"stock":             newStock,
-			"reserved_quantity": quantity,
-			"operation":         "reserve",
-		}
-		if err := s.producer.ProduceProductUpdated(productID, changes); err != nil {
-			s.log.Error("failed to send kafka event for stock reserve", "error", err)
-		}
-	}()
+	if err := s.cacheManager.InvalidateAllProductCache(ctx); err != nil {
+		log.Error("failed to invalidate product caches", "error", err)
+	}
 
 	log.Info("stock reserved successfully", "new_stock", newStock)
 	return nil
@@ -415,21 +373,9 @@ func (s *ProductService) ReleaseStock(ctx context.Context, reservationID string,
 	if !applied {
 		return nil
 	}
-	go func() {
-		if err := s.cacheManager.InvalidateAllProductCache(context.Background()); err != nil {
-			s.log.Error("failed to invalidate product caches", "error", err)
-		}
-	}()
-
-	go func() {
-		changes := map[string]any{
-			"stock":     newStock,
-			"operation": "release",
-		}
-		if err := s.producer.ProduceProductUpdated(productID, changes); err != nil {
-			s.log.Error("failed to send kafka event for stock release", "error", err)
-		}
-	}()
+	if err := s.cacheManager.InvalidateAllProductCache(ctx); err != nil {
+		log.Error("failed to invalidate product caches", "error", err)
+	}
 	log.Info("stock released successfully", "new_stock", newStock)
 	return nil
 }

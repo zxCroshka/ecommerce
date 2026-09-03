@@ -1,0 +1,41 @@
+service:
+  name: "ecommerce-service-notification"
+  environment: "local"
+
+grpc:
+  host: "0.0.0.0"
+  port: 9095
+
+postgres:
+  host: "127.0.0.1"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  database: "ecommerce"
+  sslmode: "disable"
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  group_id: "notification-service-v1"
+  topics:
+    - "user.registered"
+    - "order.created"
+  auto_offset_reset: "earliest"
+  poll_interval: "250ms"
+  handler_timeout: "3s"
+  max_retries: 5
+  retry_base_delay: "100ms"
+  retry_max_delay: "2s"
+
+user_service:
+  address: "127.0.0.1:9090"
+  timeout: "2s"
+
+notification:
+  default_list_limit: 20
+  max_list_limit: 100
+
+logging:
+  level: "info"
+  format: "json"

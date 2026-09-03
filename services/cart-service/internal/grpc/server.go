@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 
+	"github.com/zxCroshka/ecommerce/services/cart-service/internal/auth"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/customerrors"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/domain"
 	cartservicev1 "github.com/zxCroshka/ecommerce/shared/cartservice/gen/go"
@@ -14,11 +15,12 @@ import (
 )
 
 type CartService interface {
-	GetCartProducts(ctx context.Context, userID int64) (*domain.Cart, error)
-	AddProductToCart(ctx context.Context, userID, productID, quantity int64) (int64, int64, error)
-	RemoveProductFromCart(ctx context.Context, userID, productID int64) error
-	ChangeProductQuantity(ctx context.Context, userID, productID, quantity int64) error
-	GetCartForCheckout(ctx context.Context, userID int64) (*domain.Cart, error)
+	GetCartProducts(ctx context.Context) (*domain.Cart, error)
+	AddProductToCart(ctx context.Context, productID, quantity int64) (int64, int64, error)
+	RemoveProductFromCart(ctx context.Context, productID int64) error
+	ChangeProductQuantity(ctx context.Context, productID, quantity int64) error
+	GetCartForCheckout(ctx context.Context, userID int64) (*domain.CartSnapshot, error)
+	ClearCartIfUnchanged(ctx context.Context, userID, revision int64) (bool, error)
 }
 
 type ServerAPI struct {
@@ -31,11 +33,11 @@ func RegisterServerAPI(server *grpc.Server, cartService CartService) {
 }
 
 func (s *ServerAPI) GetCart(ctx context.Context, req *cartservicev1.GetCartRequest) (*cartservicev1.GetCartResponse, error) {
-	if req.GetUserId() <= 0 {
-		return nil, mapError(customerrors.ErrInvalidUserID)
+	if err := validateAuthenticatedUserID(ctx, req.GetUserId()); err != nil {
+		return nil, err
 	}
 
-	cart, err := s.cartService.GetCartProducts(ctx, req.GetUserId())
+	cart, err := s.cartService.GetCartProducts(ctx)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -44,13 +46,16 @@ func (s *ServerAPI) GetCart(ctx context.Context, req *cartservicev1.GetCartReque
 }
 
 func (s *ServerAPI) AddProduct(ctx context.Context, req *cartservicev1.AddProductRequest) (*cartservicev1.AddProductResponse, error) {
-	if err := validateCartItem(req.GetUserId(), req.GetProduct()); err != nil {
+	if err := validateAuthenticatedUserID(ctx, req.GetUserId()); err != nil {
+		return nil, err
+	}
+	if err := validateCartItem(req.GetProduct()); err != nil {
 		return nil, mapError(err)
 	}
 
 	item := req.GetProduct()
 	newQuantity, currentQuantity, err := s.cartService.AddProductToCart(
-		ctx, req.GetUserId(), item.GetProductId(), item.GetQuantity(),
+		ctx, item.GetProductId(), item.GetQuantity(),
 	)
 	if err != nil {
 		return nil, mapError(err)
@@ -62,26 +67,29 @@ func (s *ServerAPI) AddProduct(ctx context.Context, req *cartservicev1.AddProduc
 }
 
 func (s *ServerAPI) RemoveProduct(ctx context.Context, req *cartservicev1.RemoveProductRequest) (*cartservicev1.RemoveProductResponse, error) {
-	if req.GetUserId() <= 0 {
-		return nil, mapError(customerrors.ErrInvalidUserID)
+	if err := validateAuthenticatedUserID(ctx, req.GetUserId()); err != nil {
+		return nil, err
 	}
 	if req.GetProductId() <= 0 {
 		return nil, mapError(customerrors.ErrInvalidProductID)
 	}
-	if err := s.cartService.RemoveProductFromCart(ctx, req.GetUserId(), req.GetProductId()); err != nil {
+	if err := s.cartService.RemoveProductFromCart(ctx, req.GetProductId()); err != nil {
 		return nil, mapError(err)
 	}
 	return &cartservicev1.RemoveProductResponse{}, nil
 }
 
 func (s *ServerAPI) ChangeProductQuantity(ctx context.Context, req *cartservicev1.ChangeProductQuantityRequest) (*cartservicev1.ChangeProductQuantityResponse, error) {
-	if err := validateChangeCartItem(req.GetUserId(), req.GetProduct()); err != nil {
+	if err := validateAuthenticatedUserID(ctx, req.GetUserId()); err != nil {
+		return nil, err
+	}
+	if err := validateChangeCartItem(req.GetProduct()); err != nil {
 		return nil, mapError(err)
 	}
 
 	item := req.GetProduct()
 	if err := s.cartService.ChangeProductQuantity(
-		ctx, req.GetUserId(), item.GetProductId(), item.GetQuantity(),
+		ctx, item.GetProductId(), item.GetQuantity(),
 	); err != nil {
 		return nil, mapError(err)
 	}
@@ -92,17 +100,35 @@ func (s *ServerAPI) CheckoutCart(ctx context.Context, req *cartservicev1.Checkou
 	if req.GetUserId() <= 0 {
 		return nil, mapError(customerrors.ErrInvalidUserID)
 	}
-	cart, err := s.cartService.GetCartForCheckout(ctx, req.GetUserId())
+	snapshot, err := s.cartService.GetCartForCheckout(ctx, req.GetUserId())
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &cartservicev1.CheckoutCartResponse{Items: cartItemsToProto(cart)}, nil
+	return &cartservicev1.CheckoutCartResponse{
+		Items:    cartItemsToProto(&domain.Cart{Items: snapshot.Items}),
+		Revision: snapshot.Revision,
+	}, nil
 }
 
-func validateChangeCartItem(userID int64, item *cartservicev1.CartItem) error {
+func (s *ServerAPI) ClearCartIfUnchanged(
+	ctx context.Context,
+	req *cartservicev1.ClearCartIfUnchangedRequest,
+) (*cartservicev1.ClearCartIfUnchangedResponse, error) {
+	if req.GetUserId() <= 0 {
+		return nil, mapError(customerrors.ErrInvalidUserID)
+	}
+	if req.GetRevision() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "revision must be positive")
+	}
+	cleared, err := s.cartService.ClearCartIfUnchanged(ctx, req.GetUserId(), req.GetRevision())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &cartservicev1.ClearCartIfUnchangedResponse{Cleared: cleared}, nil
+}
+
+func validateChangeCartItem(item *cartservicev1.CartItem) error {
 	switch {
-	case userID <= 0:
-		return customerrors.ErrInvalidUserID
 	case item == nil || item.GetProductId() <= 0:
 		return customerrors.ErrInvalidProductID
 	default:
@@ -110,10 +136,8 @@ func validateChangeCartItem(userID int64, item *cartservicev1.CartItem) error {
 	}
 }
 
-func validateCartItem(userID int64, item *cartservicev1.CartItem) error {
+func validateCartItem(item *cartservicev1.CartItem) error {
 	switch {
-	case userID <= 0:
-		return customerrors.ErrInvalidUserID
 	case item == nil || item.GetProductId() <= 0:
 		return customerrors.ErrInvalidProductID
 	case item.GetQuantity() < 0:
@@ -121,6 +145,20 @@ func validateCartItem(userID int64, item *cartservicev1.CartItem) error {
 	default:
 		return nil
 	}
+}
+
+func validateAuthenticatedUserID(ctx context.Context, requestedUserID int64) error {
+	identity, ok := auth.UserIdentityFromContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "authenticated user identity is missing")
+	}
+	if requestedUserID < 0 {
+		return mapError(customerrors.ErrInvalidUserID)
+	}
+	if requestedUserID > 0 && requestedUserID != identity.UserID {
+		return status.Error(codes.PermissionDenied, "cart belongs to another user")
+	}
+	return nil
 }
 
 func mapError(err error) error {

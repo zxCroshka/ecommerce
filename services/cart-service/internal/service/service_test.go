@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zxCroshka/ecommerce/services/cart-service/internal/auth"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/customerrors"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/domain"
 	productservicev1 "github.com/zxCroshka/ecommerce/shared/productservice/gen/go"
@@ -22,6 +23,7 @@ type fakeCartManager struct {
 	insertMax      int64
 	insertQuantity int64
 	checkoutErr    error
+	snapshot       *domain.CartSnapshot
 }
 
 func (f *fakeCartManager) InsertCartProduct(
@@ -55,8 +57,12 @@ func (f *fakeCartManager) ChangeProductQuantity(
 	return nil
 }
 
-func (f *fakeCartManager) GetCartForCheckout(context.Context, int64) (*domain.Cart, error) {
-	return nil, f.checkoutErr
+func (f *fakeCartManager) GetCartSnapshot(context.Context, int64, time.Duration) (*domain.CartSnapshot, error) {
+	return f.snapshot, f.checkoutErr
+}
+
+func (f *fakeCartManager) ClearCartIfUnchanged(context.Context, int64, int64, time.Duration) (bool, error) {
+	return true, nil
 }
 
 type fakeProductClient struct {
@@ -75,6 +81,10 @@ func newTestService(manager CartManager, productClient ProductServiceClient) *Ca
 	return NewCartService(log, manager, productClient, 7*24*time.Hour, 99)
 }
 
+func userContext() context.Context {
+	return auth.WithUserIdentity(context.Background(), auth.UserIdentity{UserID: 1, Role: "customer"})
+}
+
 func TestAddProductToCart_UsesConfiguredLimit(t *testing.T) {
 	manager := &fakeCartManager{}
 	productClient := &fakeProductClient{
@@ -82,7 +92,7 @@ func TestAddProductToCart_UsesConfiguredLimit(t *testing.T) {
 	}
 	srv := newTestService(manager, productClient)
 
-	_, _, err := srv.AddProductToCart(context.Background(), 1, 10, 5)
+	_, _, err := srv.AddProductToCart(userContext(), 10, 5)
 	require.NoError(t, err)
 	assert.True(t, manager.insertCalled)
 	assert.EqualValues(t, 99, manager.insertMax)
@@ -93,7 +103,7 @@ func TestAddProductToCart_ZeroRemovesWithoutProductCall(t *testing.T) {
 	productClient := &fakeProductClient{}
 	srv := newTestService(manager, productClient)
 
-	_, _, err := srv.AddProductToCart(context.Background(), 1, 10, 0)
+	_, _, err := srv.AddProductToCart(userContext(), 10, 0)
 	require.NoError(t, err)
 	assert.False(t, productClient.called)
 	assert.False(t, manager.insertCalled)
@@ -105,7 +115,7 @@ func TestChangeProductQuantity_NonPositiveRemovesWithoutProductCall(t *testing.T
 	productClient := &fakeProductClient{}
 	srv := newTestService(manager, productClient)
 
-	err := srv.ChangeProductQuantity(context.Background(), 1, 10, -1)
+	err := srv.ChangeProductQuantity(userContext(), 10, -1)
 	require.NoError(t, err)
 	assert.False(t, productClient.called)
 	assert.True(t, manager.changeCalled)
@@ -118,7 +128,7 @@ func TestChangeProductQuantity_RejectsConfiguredLimit(t *testing.T) {
 	}
 	srv := newTestService(manager, productClient)
 
-	err := srv.ChangeProductQuantity(context.Background(), 1, 10, 100)
+	err := srv.ChangeProductQuantity(userContext(), 10, 100)
 	assert.ErrorIs(t, err, customerrors.ErrQuantityExceedsLimit)
 	assert.False(t, manager.changeCalled)
 }
@@ -127,6 +137,14 @@ func TestGetCartForCheckout_EmptyCart(t *testing.T) {
 	manager := &fakeCartManager{checkoutErr: customerrors.ErrCartEmpty}
 	srv := newTestService(manager, &fakeProductClient{})
 
-	_, err := srv.GetCartForCheckout(context.Background(), 1)
+	ctx := auth.WithServiceIdentity(context.Background())
+	_, err := srv.GetCartForCheckout(ctx, 1)
 	assert.True(t, errors.Is(err, customerrors.ErrCartEmpty))
+}
+
+func TestUserMethodsRequireIdentityFromContext(t *testing.T) {
+	srv := newTestService(&fakeCartManager{}, &fakeProductClient{})
+
+	_, err := srv.GetCartProducts(context.Background())
+	assert.ErrorIs(t, err, customerrors.ErrInvalidUserID)
 }

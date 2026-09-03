@@ -1,4 +1,7 @@
-.PHONY: lint lint-fix migrate-create-userservice migrate-create-productservice test test-unit test-integration test-integration-product test-coverage build run lint-errcheck migrate-up test-grpc test-http generate-proto-userservice generate-proto-productservice generate-proto-cartservice run-productservice run-userservice build-productservice build-userservice migrate-up-userservice migrate-down-userservice migrate-up-productservice migrate-down-productservice test-postgres run-only
+.PHONY: lint lint-fix build test test-unit test-integration test-integration-product test-integration-order test-integration-notification test-race docker-up docker-down e2e-smoke migrate-create-userservice migrate-create-productservice migrate-create-orderservice migrate-create-notificationservice migrate-up-userservice migrate-down-userservice migrate-up-productservice migrate-down-productservice migrate-up-orderservice migrate-down-orderservice migrate-up-notificationservice migrate-down-notificationservice generate-proto generate-proto-userservice generate-proto-productservice generate-proto-cartservice generate-proto-orderservice generate-proto-notificationservice
+
+build:
+	go build ./...
 
 lint:
 	golangci-lint run ./... --build-tags=integration
@@ -12,40 +15,69 @@ migrate-create-userservice:
 migrate-create-productservice:
 	migrate create -dir services/product-service/migrations/ -ext sql -seq init
 
+migrate-create-orderservice:
+	migrate create -dir services/order-service/migrations/ -ext sql -seq init
+
+migrate-create-notificationservice:
+	migrate create -dir services/notification-service/migrations/ -ext sql -seq init
+
 migrate-up-userservice:
-	migrate -path ./services/user-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable" up
+	migrate -path ./services/user-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=userservice_schema_migrations" up
 
 migrate-down-userservice:
-	migrate -path ./services/user-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable" down
+	migrate -path ./services/user-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=userservice_schema_migrations" down
 
 migrate-up-productservice:
-	migrate -path ./services/product-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable" up
+	migrate -path ./services/product-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=productservice_schema_migrations" up
 
 migrate-down-productservice:
-	migrate -path ./services/product-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable" down
+	migrate -path ./services/product-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=productservice_schema_migrations" down
+
+migrate-up-orderservice:
+	migrate -path ./services/order-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=orderservice_schema_migrations" up
+
+migrate-down-orderservice:
+	migrate -path ./services/order-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=orderservice_schema_migrations" down
+
+migrate-up-notificationservice:
+	migrate -path ./services/notification-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=notificationservice_schema_migrations" up
+
+migrate-down-notificationservice:
+	migrate -path ./services/notification-service/migrations -database "postgres://postgres:postgres@localhost:5432/ecommerce?sslmode=disable&x-migrations-table=notificationservice_schema_migrations" down
 
 test:
-	go test ./... -v
+	go test ./...
 
 test-unit:
-	go test ./internal/repository/users/... -v
-	go test ./internal/repository/... -v -short
+	go test -short ./...
 
 test-integration:
-	go test ./internal/repository/... -v -tags=integration
+	go test -tags=integration -count=1 ./services/user-service/internal/repository/... ./services/product-service/internal/repository/postgres ./services/order-service/internal/repository ./services/notification-service/internal/repository
 
 test-integration-product:
 	go test -tags=integration -count=1 -v ./services/product-service/internal/repository/postgres
 
+test-integration-order:
+	go test -tags=integration -count=1 -v ./services/order-service/internal/repository
+
+test-integration-notification:
+	go test -tags=integration -count=1 -v ./services/notification-service/internal/repository
+
+test-race:
+	go test -race ./services/notification-service/... ./services/order-service/internal/service ./services/cart-service/internal/repository ./services/product-service/internal/repository/redis ./shared/outbox
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+e2e-smoke:
+	./tests/e2e/smoke.sh
+
 test-coverage:
 	go test ./... -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
-
-test-postgres:
-	docker-compose up -d postgres
-	sleep 5
-	go test ./internal/repository/... -v
-	docker-compose down
 
 generate-proto-userservice:
 	protoc -I ./shared/userservice/proto \
@@ -73,28 +105,20 @@ generate-proto-cartservice:
 		--go-grpc_out=./shared/cartservice/gen/go \
 		--go-grpc_opt=paths=source_relative
 
+generate-proto-orderservice:
+	protoc -I ./shared/orderservice/proto \
+		./shared/orderservice/proto/orderservice.proto \
+		--go_out=./shared/orderservice/gen/go \
+		--go_opt=paths=source_relative \
+		--go-grpc_out=./shared/orderservice/gen/go \
+		--go-grpc_opt=paths=source_relative
 
+generate-proto-notificationservice:
+	protoc -I ./shared/notificationservice/proto \
+		./shared/notificationservice/proto/notificationservice.proto \
+		--go_out=./shared/notificationservice/gen/go \
+		--go_opt=paths=source_relative \
+		--go-grpc_out=./shared/notificationservice/gen/go \
+		--go-grpc_opt=paths=source_relative
 
-build-userservice:
-	cd services/user-service && go build -o bin/user-service cmd/main.go
-
-build-productservice:
-	cd services/product-service && go build -o bin/product-service cmd/main.go
-
-run-userservice: build-userservice
-	cd services/user-service && ./bin/user-service -config=./config/config.yaml
-
-run-productservice: build-productservice
-	cd services/product-service && ./bin/product-service -config=./config/config.yaml
-
-run-only:
-	./services/user-service/bin/user-service -config=./services/user-service/config/config.yaml
-
-lint-errcheck:
-	golangci-lint run --disable errcheck ./...
-
-test-grpc:
-	go test ./services/user-service/internal/grpc/... -v
-
-test-http:
-	go test ./services/gateway/internal/handlers/... ./services/gateway/internal/middleware/... ./services/gateway/internal/router/... -v
+generate-proto: generate-proto-userservice generate-proto-productservice generate-proto-cartservice generate-proto-orderservice generate-proto-notificationservice

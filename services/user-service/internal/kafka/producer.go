@@ -1,103 +1,95 @@
 package kaf
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
-	"github.com/google/uuid"
+	confluent "github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
-const (
-	flushTimeout = 500
-)
+const flushTimeoutMilliseconds = 5_000
 
-var (
-	topic          string = "user.registered"
-	errUnknownType        = errors.New("unknown event type")
-)
+var errUnknownDeliveryEvent = errors.New("unknown Kafka delivery event")
 
-type Event[T any] struct {
-	EventID    string    `json:"event_id"`
-	EventType  string    `json:"event_type"`
-	Version    int       `json:"version"`
-	OccurredAt time.Time `json:"occurred_at"`
-	Payload    T         `json:"payload"`
-}
-type UserRegisteredEvent struct {
-	UserID    int64  `json:"user_id"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	Role      string `json:"role"`
-	Timestamp int64  `json:"timestamp"`
+type producerClient interface {
+	Produce(message *confluent.Message, deliveryChan chan confluent.Event) error
+	Flush(timeoutMs int) int
+	Close()
 }
 
 type Producer struct {
-	producer *kafka.Producer
+	client    producerClient
+	closeOnce sync.Once
+	closeErr  error
 }
 
-func NewProducer(address []string) (*Producer, error) {
-	conf := &kafka.ConfigMap{
-		"bootstrap.servers": strings.Join(address, ","),
+func NewProducer(addresses []string) (*Producer, error) {
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("Kafka broker list is empty")
 	}
-	p, err := kafka.NewProducer(conf)
+	client, err := confluent.NewProducer(&confluent.ConfigMap{
+		"bootstrap.servers": strings.Join(addresses, ","),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("error with new producer: %w", err)
+		return nil, fmt.Errorf("create Kafka producer: %w", err)
 	}
-	return &Producer{producer: p}, nil
+	return &Producer{client: client}, nil
 }
 
-func (p *Producer) Produce(userID int64, email, name string) error {
-	event := Event[UserRegisteredEvent]{
-		EventID:    uuid.New().String(),
-		EventType:  "user.registered",
-		Version:    1,
-		OccurredAt: time.Now(),
-		Payload: UserRegisteredEvent{
-			UserID:    userID,
-			Email:     email,
-			Name:      name,
-			Role:      "customer",
-			Timestamp: time.Now().Unix(),
-		},
+func (p *Producer) Publish(ctx context.Context, topic string, key, value []byte) error {
+	if p == nil || p.client == nil {
+		return fmt.Errorf("Kafka producer is not initialized")
+	}
+	if strings.TrimSpace(topic) == "" {
+		return fmt.Errorf("Kafka topic is required")
 	}
 
-	value, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("error marshaling event: %w", err)
-	}
-
-	kafkamsg := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
+	delivery := make(chan confluent.Event, 1)
+	message := &confluent.Message{
+		TopicPartition: confluent.TopicPartition{
 			Topic:     &topic,
-			Partition: kafka.PartitionAny,
+			Partition: confluent.PartitionAny,
 		},
-		Value:     value,
-		Key:       []byte(strconv.FormatInt(userID, 10)),
-		Timestamp: time.Now(),
+		Key:       append([]byte(nil), key...),
+		Value:     append([]byte(nil), value...),
+		Timestamp: time.Now().UTC(),
+	}
+	if err := p.client.Produce(message, delivery); err != nil {
+		return fmt.Errorf("enqueue Kafka message: %w", err)
 	}
 
-	kafkachan := make(chan kafka.Event)
-	if err := p.producer.Produce(kafkamsg, kafkachan); err != nil {
-		return fmt.Errorf("error while producing message: %w", err)
-	}
-
-	e := <-kafkachan
-	switch ev := e.(type) {
-	case *kafka.Message:
-		return nil
-	case kafka.Error:
-		return ev
-	default:
-		return errUnknownType
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case event := <-delivery:
+		switch delivered := event.(type) {
+		case *confluent.Message:
+			if delivered.TopicPartition.Error != nil {
+				return fmt.Errorf("Kafka delivery failed: %w", delivered.TopicPartition.Error)
+			}
+			return nil
+		case confluent.Error:
+			return fmt.Errorf("Kafka delivery failed: %w", delivered)
+		default:
+			return errUnknownDeliveryEvent
+		}
 	}
 }
 
-func (p *Producer) Close() {
-	p.producer.Flush(flushTimeout)
-	p.producer.Close()
+func (p *Producer) Close() error {
+	if p == nil || p.client == nil {
+		return nil
+	}
+	p.closeOnce.Do(func() {
+		remaining := p.client.Flush(flushTimeoutMilliseconds)
+		if remaining > 0 {
+			p.closeErr = fmt.Errorf("close Kafka producer: %d messages were not delivered", remaining)
+		}
+		p.client.Close()
+	})
+	return p.closeErr
 }

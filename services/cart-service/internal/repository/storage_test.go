@@ -70,7 +70,7 @@ func TestChangeAndDeleteCartProduct(t *testing.T) {
 	assert.False(t, server.Exists("cart:1"))
 }
 
-func TestGetCartForCheckout_ReturnsAndDeletesCart(t *testing.T) {
+func TestCartSnapshotIsNonDestructiveAndConditionalClear(t *testing.T) {
 	client, server := newTestClient(t)
 	ctx := context.Background()
 
@@ -79,11 +79,36 @@ func TestGetCartForCheckout_ReturnsAndDeletesCart(t *testing.T) {
 	_, _, err = client.InsertCartProduct(ctx, 5, 200, 3, 99, time.Hour)
 	require.NoError(t, err)
 
-	cart, err := client.GetCartForCheckout(ctx, 5)
+	snapshot, err := client.GetCartSnapshot(ctx, 5, time.Hour)
 	require.NoError(t, err)
-	assert.Equal(t, map[domain.ProductID]domain.Quantity{100: 2, 200: 3}, cart.Items)
+	assert.Equal(t, map[domain.ProductID]domain.Quantity{100: 2, 200: 3}, snapshot.Items)
+	assert.EqualValues(t, 2, snapshot.Revision)
+	assert.True(t, server.Exists("cart:5"), "snapshot must not consume the cart")
+
+	cleared, err := client.ClearCartIfUnchanged(ctx, 5, snapshot.Revision, time.Hour)
+	require.NoError(t, err)
+	assert.True(t, cleared)
 	assert.False(t, server.Exists("cart:5"))
 
-	_, err = client.GetCartForCheckout(ctx, 5)
+	_, err = client.GetCartSnapshot(ctx, 5, time.Hour)
 	assert.True(t, errors.Is(err, customerrors.ErrCartEmpty))
+}
+
+func TestConditionalClearPreservesConcurrentCartChanges(t *testing.T) {
+	client, server := newTestClient(t)
+	ctx := context.Background()
+	ttl := time.Hour
+
+	_, _, err := client.InsertCartProduct(ctx, 7, 100, 2, 99, ttl)
+	require.NoError(t, err)
+	snapshot, err := client.GetCartSnapshot(ctx, 7, ttl)
+	require.NoError(t, err)
+
+	_, _, err = client.InsertCartProduct(ctx, 7, 200, 1, 99, ttl)
+	require.NoError(t, err)
+	cleared, err := client.ClearCartIfUnchanged(ctx, 7, snapshot.Revision, ttl)
+	require.NoError(t, err)
+	assert.False(t, cleared)
+	assert.Equal(t, "2", server.HGet("cart:7", "100"))
+	assert.Equal(t, "1", server.HGet("cart:7", "200"))
 }

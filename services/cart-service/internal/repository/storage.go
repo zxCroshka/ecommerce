@@ -24,6 +24,7 @@ type Config struct {
 var (
 	addToCartScript = redis.NewScript(`
 		local cartKey = KEYS[1]
+		local revisionKey = KEYS[2]
 		local productId = ARGV[1]
 		local quantity = tonumber(ARGV[2])
 		local ttl = tonumber(ARGV[3])
@@ -36,18 +37,25 @@ var (
 		end
 
 
+		if newQuantity == currentQuantity then
+			return {newQuantity,currentQuantity}
+		end
+
 		if newQuantity <= 0 then
 			redis.call("HDEL", cartKey, productId)
 		else
 			redis.call("HSET", cartKey, productId, newQuantity)
 		end
 		
+		redis.call("INCR", revisionKey)
 		redis.call("EXPIRE", cartKey, ttl)
+		redis.call("EXPIRE", revisionKey, ttl)
 		return {newQuantity,currentQuantity}
 
 	`)
 	changeProductQuantityScript = redis.NewScript(`
 		local cartKey = KEYS[1]
+		local revisionKey = KEYS[2]
 		local productId = ARGV[1]
 		local quantity = tonumber(ARGV[2])
 		local ttl = tonumber(ARGV[3])
@@ -61,23 +69,56 @@ var (
 			return redis.error_reply("ttl must be positive")
 		end
 
+		if quantity == currentQuantity then
+			return {quantity,currentQuantity}
+		end
+
 		if quantity <= 0 then
 			redis.call("HDEL", cartKey, productId)
 		else
 			redis.call("HSET", cartKey, productId, quantity)
 		end
+		redis.call("INCR", revisionKey)
 		redis.call("EXPIRE", cartKey, ttl)
+		redis.call("EXPIRE", revisionKey, ttl)
 		return {quantity,currentQuantity}
 	
 	`)
 	checkoutCartScript = redis.NewScript(`
 		local cartKey = KEYS[1]
+		local revisionKey = KEYS[2]
+		local ttl = tonumber(ARGV[1])
 		local items = redis.call("HGETALL", cartKey)
 		if #items == 0 then
 			return {}
 		end
+		local revision = redis.call("GET", revisionKey)
+		if not revision then
+			revision = 1
+			redis.call("SET", revisionKey, revision, "EX", ttl)
+		end
+		local result = {tonumber(revision)}
+		for _, value in ipairs(items) do
+			table.insert(result, value)
+		end
+		return result
+	`)
+	clearCartIfUnchangedScript = redis.NewScript(`
+		local cartKey = KEYS[1]
+		local revisionKey = KEYS[2]
+		local expectedRevision = tonumber(ARGV[1])
+		local ttl = tonumber(ARGV[2])
+		local currentRevision = tonumber(redis.call("GET", revisionKey) or "0")
+		if currentRevision ~= expectedRevision then
+			return 0
+		end
+		if redis.call("HLEN", cartKey) == 0 then
+			return 0
+		end
 		redis.call("DEL", cartKey)
-		return items
+		redis.call("INCR", revisionKey)
+		redis.call("EXPIRE", revisionKey, ttl)
+		return 1
 	`)
 )
 
@@ -104,7 +145,8 @@ func NewClient(cfg Config) (*Client, error) {
 func (c *Client) InsertCartProduct(ctx context.Context, userId int64, productId int64, quantity, maxQuantity int64, ttl time.Duration) (int64, int64, error) {
 	const op = "repository.InsertCartProduct"
 	cartKey := fmt.Sprintf("cart:%d", userId)
-	result, err := addToCartScript.Run(ctx, c.client, []string{cartKey}, productId, quantity, int(ttl.Seconds()), maxQuantity).Result()
+	revisionKey := fmt.Sprintf("cart:%d:revision", userId)
+	result, err := addToCartScript.Run(ctx, c.client, []string{cartKey, revisionKey}, productId, quantity, int(ttl.Seconds()), maxQuantity).Result()
 	if err != nil {
 		return 0, 0, fmt.Errorf("%s: %w: %w", op, customerrors.ErrScriptExecute, err)
 	}
@@ -148,20 +190,14 @@ func (c *Client) GetCartProducts(ctx context.Context, userId int64) (*domain.Car
 	return cart, nil
 }
 
-func (c *Client) ClearCart(ctx context.Context, userId int64) error {
-	const op = "repository.ClearCart"
-	cartKey := fmt.Sprintf("cart:%d", userId)
-	if err := c.client.Del(ctx, cartKey).Err(); err != nil {
-		return fmt.Errorf("%s: %w: %w", op, customerrors.ErrClearCart, err)
-	}
-	return nil
-}
-
-func (c *Client) GetCartForCheckout(ctx context.Context, userID int64) (*domain.Cart, error) {
+func (c *Client) GetCartSnapshot(ctx context.Context, userID int64, ttl time.Duration) (*domain.CartSnapshot, error) {
 	const op = "repository.GetCartForCheckout"
 	cartKey := fmt.Sprintf("cart:%d", userID)
+	revisionKey := fmt.Sprintf("cart:%d:revision", userID)
 
-	result, err := checkoutCartScript.Run(ctx, c.client, []string{cartKey}).Result()
+	result, err := checkoutCartScript.Run(
+		ctx, c.client, []string{cartKey, revisionKey}, int(ttl.Seconds()),
+	).Result()
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w: %w", op, customerrors.ErrCheckoutCart, err)
 	}
@@ -172,19 +208,44 @@ func (c *Client) GetCartForCheckout(ctx context.Context, userID int64) (*domain.
 	if len(values) == 0 {
 		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrCartEmpty)
 	}
-	if len(values)%2 != 0 {
+	if len(values) < 3 || (len(values)-1)%2 != 0 {
+		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrUnexpectedResult)
+	}
+	revision, ok := values[0].(int64)
+	if !ok || revision <= 0 {
 		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrUnexpectedResult)
 	}
 
-	items := make(map[string]string, len(values)/2)
-	for i := 0; i < len(values); i += 2 {
+	items := make(map[string]string, (len(values)-1)/2)
+	for i := 1; i < len(values); i += 2 {
 		items[fmt.Sprint(values[i])] = fmt.Sprint(values[i+1])
 	}
 	cart, err := domain.NewCart(items)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w: %w", op, customerrors.ErrInvalidCartData, err)
 	}
-	return cart, nil
+	return &domain.CartSnapshot{Items: cart.Items, Revision: revision}, nil
+}
+
+func (c *Client) ClearCartIfUnchanged(
+	ctx context.Context,
+	userID, revision int64,
+	ttl time.Duration,
+) (bool, error) {
+	const op = "repository.ClearCartIfUnchanged"
+	cartKey := fmt.Sprintf("cart:%d", userID)
+	revisionKey := fmt.Sprintf("cart:%d:revision", userID)
+	cleared, err := clearCartIfUnchangedScript.Run(
+		ctx,
+		c.client,
+		[]string{cartKey, revisionKey},
+		revision,
+		int(ttl.Seconds()),
+	).Int()
+	if err != nil {
+		return false, fmt.Errorf("%s: %w: %w", op, customerrors.ErrConditionalClear, err)
+	}
+	return cleared == 1, nil
 }
 
 func (c *Client) ChangeProductQuantity(ctx context.Context, userID int64, productID, newQuantity int64, ttl time.Duration) error {
@@ -201,8 +262,9 @@ func (c *Client) runChangeProductQuantity(
 	ttl time.Duration,
 ) (int64, error) {
 	cartKey := fmt.Sprintf("cart:%d", userID)
+	revisionKey := fmt.Sprintf("cart:%d:revision", userID)
 	result, err := changeProductQuantityScript.Run(
-		ctx, c.client, []string{cartKey}, productID, newQuantity, int(ttl.Seconds()),
+		ctx, c.client, []string{cartKey, revisionKey}, productID, newQuantity, int(ttl.Seconds()),
 	).Result()
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", customerrors.ErrScriptExecute, err)

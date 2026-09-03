@@ -16,33 +16,34 @@ import (
 )
 
 type fakeCartService struct {
-	getCartFn               func(context.Context, int64) (*domain.Cart, error)
-	addProductFn            func(context.Context, int64, int64, int64) (*domain.AddProductResult, error)
-	removeProductFn         func(context.Context, int64, int64) error
-	changeProductQuantityFn func(context.Context, int64, int64, int64) error
+	getCartFn               func(context.Context, string, int64) (*domain.Cart, error)
+	addProductFn            func(context.Context, string, int64, int64, int64) (*domain.AddProductResult, error)
+	removeProductFn         func(context.Context, string, int64, int64) error
+	changeProductQuantityFn func(context.Context, string, int64, int64, int64) error
 }
 
-func (f *fakeCartService) GetCart(ctx context.Context, userID int64) (*domain.Cart, error) {
-	return f.getCartFn(ctx, userID)
+func (f *fakeCartService) GetCart(ctx context.Context, token string, userID int64) (*domain.Cart, error) {
+	return f.getCartFn(ctx, token, userID)
 }
 
-func (f *fakeCartService) AddProduct(ctx context.Context, userID, productID, quantity int64) (*domain.AddProductResult, error) {
-	return f.addProductFn(ctx, userID, productID, quantity)
+func (f *fakeCartService) AddProduct(ctx context.Context, token string, userID, productID, quantity int64) (*domain.AddProductResult, error) {
+	return f.addProductFn(ctx, token, userID, productID, quantity)
 }
 
-func (f *fakeCartService) RemoveProduct(ctx context.Context, userID, productID int64) error {
-	return f.removeProductFn(ctx, userID, productID)
+func (f *fakeCartService) RemoveProduct(ctx context.Context, token string, userID, productID int64) error {
+	return f.removeProductFn(ctx, token, userID, productID)
 }
 
-func (f *fakeCartService) ChangeProductQuantity(ctx context.Context, userID, productID, quantity int64) error {
-	return f.changeProductQuantityFn(ctx, userID, productID, quantity)
+func (f *fakeCartService) ChangeProductQuantity(ctx context.Context, token string, userID, productID, quantity int64) error {
+	return f.changeProductQuantityFn(ctx, token, userID, productID, quantity)
 }
 
 func TestGetCartUsesAuthenticatedUserID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	service := &fakeCartService{
-		getCartFn: func(_ context.Context, userID int64) (*domain.Cart, error) {
+		getCartFn: func(_ context.Context, token string, userID int64) (*domain.Cart, error) {
+			require.Equal(t, "access-token", token)
 			require.Equal(t, int64(42), userID)
 			return &domain.Cart{Items: []domain.CartItem{{ProductID: 7, Quantity: 2}}}, nil
 		},
@@ -62,7 +63,8 @@ func TestAddProductAcceptsZeroQuantity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	service := &fakeCartService{
-		addProductFn: func(_ context.Context, userID, productID, quantity int64) (*domain.AddProductResult, error) {
+		addProductFn: func(_ context.Context, token string, userID, productID, quantity int64) (*domain.AddProductResult, error) {
+			require.Equal(t, "access-token", token)
 			require.Equal(t, int64(42), userID)
 			require.Equal(t, int64(7), productID)
 			require.Zero(t, quantity)
@@ -90,7 +92,8 @@ func TestChangeQuantityUsesPathProductID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	service := &fakeCartService{
-		changeProductQuantityFn: func(_ context.Context, userID, productID, quantity int64) error {
+		changeProductQuantityFn: func(_ context.Context, token string, userID, productID, quantity int64) error {
+			require.Equal(t, "access-token", token)
 			require.Equal(t, int64(42), userID)
 			require.Equal(t, int64(8), productID)
 			require.Equal(t, int64(3), quantity)
@@ -117,7 +120,7 @@ func TestRemoveProductRejectsInvalidPathID(t *testing.T) {
 
 	serviceCalled := false
 	service := &fakeCartService{
-		removeProductFn: func(context.Context, int64, int64) error {
+		removeProductFn: func(context.Context, string, int64, int64) error {
 			serviceCalled = true
 			return nil
 		},
@@ -137,7 +140,7 @@ func TestCartHandlerRequiresPrincipal(t *testing.T) {
 
 	serviceCalled := false
 	service := &fakeCartService{
-		getCartFn: func(context.Context, int64) (*domain.Cart, error) {
+		getCartFn: func(context.Context, string, int64) (*domain.Cart, error) {
 			serviceCalled = true
 			return nil, nil
 		},

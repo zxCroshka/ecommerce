@@ -127,6 +127,34 @@ services:
     networks:
       - ecommerce-network
 
+  migrate-order:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./services/order-service/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/ecommerce?sslmode=disable&x-migrations-table=orderservice_schema_migrations"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
+  migrate-notification:
+    image: migrate/migrate:v4.19.1
+    volumes:
+      - ./services/notification-service/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@postgres:5432/ecommerce?sslmode=disable&x-migrations-table=notificationservice_schema_migrations"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+
   user-service:
     build:
       context: .
@@ -148,6 +176,12 @@ services:
         condition: service_healthy
     networks:
       - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "9090" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     restart: on-failure
   product-service:
     build:
@@ -165,13 +199,19 @@ services:
       migrate-product:
         condition: service_completed_successfully
       user-service:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       kafka:
         condition: service_healthy
     networks:
       - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "9091" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     restart: on-failure
 
   cart-service:
@@ -181,16 +221,87 @@ services:
     environment:
       APP_REDIS_HOST: redis
       APP_PRODUCT_SERVICE_ADDRESS: product-service:9091
+      APP_USER_SERVICE_ADDRESS: user-service:9090
+      APP_GRPC_INTERNAL_TOKEN: local-dev-cart-service-token-change-me
     ports:
       - "9093:9093"
     depends_on:
       product-service:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
       - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "9093" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     restart: on-failure
+
+  order-service:
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    environment:
+      APP_POSTGRES_HOST: postgres
+      APP_KAFKA_BROKERS: kafka:29092
+      APP_USER_SERVICE_ADDRESS: user-service:9090
+      APP_CART_SERVICE_ADDRESS: cart-service:9093
+      APP_CART_SERVICE_INTERNAL_TOKEN: local-dev-cart-service-token-change-me
+      APP_PRODUCT_SERVICE_ADDRESS: product-service:9091
+      APP_PRODUCT_SERVICE_INTERNAL_TOKEN: local-dev-product-service-token-change-me
+    ports:
+      - "9094:9094"
+    depends_on:
+      migrate-order:
+        condition: service_completed_successfully
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "9094" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: on-failure
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      APP_POSTGRES_HOST: postgres
+      APP_KAFKA_BROKERS: kafka:29092
+      APP_USER_SERVICE_ADDRESS: user-service:9090
+    ports:
+      - "9095:9095"
+    depends_on:
+      migrate-notification:
+        condition: service_completed_successfully
+      user-service:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "localhost", "9095" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: on-failure
+
   api-gateway:
     build:
       context: .
@@ -202,15 +313,27 @@ services:
       APP_PRODUCT_SERVICE_ADDRESS: product-service:9091
       APP_PRODUCT_SERVICE_INTERNAL_TOKEN: local-dev-product-service-token-change-me
       APP_CART_SERVICE_ADDRESS: cart-service:9093
+      APP_ORDER_SERVICE_ADDRESS: order-service:9094
+      APP_NOTIFICATION_SERVICE_ADDRESS: notification-service:9095
     depends_on:
       user-service:
-        condition: service_started
+        condition: service_healthy
       product-service:
-        condition: service_started
+        condition: service_healthy
       cart-service:
-        condition: service_started
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
     networks:
       - ecommerce-network
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8085/healthz" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     restart: on-failure
 
 volumes:

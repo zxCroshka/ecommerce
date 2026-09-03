@@ -102,6 +102,17 @@ type cacheManagerMock struct {
 	getProductFn    func(context.Context, int64) (*domain.Product, error)
 	invalidateAllFn func(context.Context) error
 	buildKeyFn      func(domain.ProductFilter, domain.SortField, domain.SortOrder, int, int) string
+	generationFn    func(context.Context) (int64, error)
+}
+
+func (m *cacheManagerMock) SetListProductsCacheIfGeneration(
+	ctx context.Context,
+	key string,
+	products []*domain.Product,
+	total int64,
+	_ int64,
+) (bool, error) {
+	return true, m.SetListProductsCache(ctx, key, products, total)
 }
 
 func (m *cacheManagerMock) SetListProductsCache(
@@ -114,6 +125,15 @@ func (m *cacheManagerMock) SetListProductsCache(
 		return nil
 	}
 	return m.setListFn(ctx, key, products, total)
+}
+
+func (m *cacheManagerMock) SetProductCacheIfGeneration(
+	ctx context.Context,
+	productID int64,
+	product *domain.Product,
+	_ int64,
+) (bool, error) {
+	return true, m.SetProductCache(ctx, productID, product)
 }
 
 func (m *cacheManagerMock) GetListProductsCache(
@@ -166,6 +186,13 @@ func (m *cacheManagerMock) InvalidateAllProductCache(ctx context.Context) error 
 	return m.invalidateAllFn(ctx)
 }
 
+func (m *cacheManagerMock) CacheGeneration(ctx context.Context) (int64, error) {
+	if m.generationFn == nil {
+		return 0, nil
+	}
+	return m.generationFn(ctx)
+}
+
 func (m *cacheManagerMock) BuildListCacheKey(
 	filter domain.ProductFilter,
 	sort domain.SortField,
@@ -194,10 +221,10 @@ func (m *producerMock) ProduceProductUpdated(productID int64, changes map[string
 func newTestService(
 	products ProductManager,
 	cache CacheManager,
-	producer Producer,
+	_ any,
 ) *ProductService {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(log, products, cache, producer)
+	return New(log, products, cache)
 }
 
 func validProduct() *domain.Product {
@@ -403,12 +430,11 @@ func TestUpdateProductFields(t *testing.T) {
 		})
 	}
 
-	t.Run("success produces price and stock changes", func(t *testing.T) {
+	t.Run("success invalidates cache synchronously", func(t *testing.T) {
 		price := int64(12_000)
 		stock := int64(15)
 		active := false
 		invalidated := make(chan struct{}, 1)
-		events := make(chan map[string]any, 1)
 
 		products := &productManagerMock{
 			getFn: func(context.Context, int64) (*domain.Product, error) {
@@ -427,14 +453,7 @@ func TestUpdateProductFields(t *testing.T) {
 				return nil
 			},
 		}
-		producer := &producerMock{
-			produceFn: func(productID int64, changes map[string]any) error {
-				require.Equal(t, int64(42), productID)
-				events <- changes
-				return nil
-			},
-		}
-		srv := newTestService(products, cache, producer)
+		srv := newTestService(products, cache, &producerMock{})
 
 		err := srv.UpdateProductFields(
 			context.Background(),
@@ -445,12 +464,6 @@ func TestUpdateProductFields(t *testing.T) {
 
 		require.NoError(t, err)
 		waitSignal(t, invalidated)
-		changes := waitChanges(t, events)
-		require.Equal(t, int64(10_000), changes["old_price"])
-		require.Equal(t, int64(12_000), changes["new_price"])
-		require.Equal(t, int64(20), changes["old_stock"])
-		require.Equal(t, int64(15), changes["new_stock"])
-		require.Equal(t, false, changes["is_active"])
 	})
 
 	t.Run("repository update error is preserved", func(t *testing.T) {
@@ -755,9 +768,8 @@ func TestSoftDelete(t *testing.T) {
 		require.ErrorIs(t, err, deleteErr)
 	})
 
-	t.Run("success invalidates cache and produces event", func(t *testing.T) {
+	t.Run("success invalidates cache", func(t *testing.T) {
 		invalidated := make(chan struct{}, 1)
-		events := make(chan map[string]any, 1)
 		products := &productManagerMock{
 			getFn: func(context.Context, int64) (*domain.Product, error) {
 				return validProduct(), nil
@@ -773,22 +785,12 @@ func TestSoftDelete(t *testing.T) {
 				return nil
 			},
 		}
-		producer := &producerMock{
-			produceFn: func(productID int64, changes map[string]any) error {
-				require.Equal(t, int64(42), productID)
-				events <- changes
-				return nil
-			},
-		}
-		srv := newTestService(products, cache, producer)
+		srv := newTestService(products, cache, &producerMock{})
 
 		err := srv.SoftDelete(context.Background(), 42, true)
 
 		require.NoError(t, err)
 		waitSignal(t, invalidated)
-		changes := waitChanges(t, events)
-		require.Equal(t, false, changes["is_active"])
-		require.IsType(t, int64(0), changes["deleted_at"])
 	})
 }
 
@@ -848,9 +850,8 @@ func TestReserveStock(t *testing.T) {
 		require.Zero(t, producer.calls.Load())
 	})
 
-	t.Run("success invalidates cache and produces event", func(t *testing.T) {
+	t.Run("success invalidates cache", func(t *testing.T) {
 		invalidated := make(chan struct{}, 1)
-		events := make(chan map[string]any, 1)
 		products := &productManagerMock{
 			reserveStockFn: func(
 				_ context.Context,
@@ -869,22 +870,12 @@ func TestReserveStock(t *testing.T) {
 				return nil
 			},
 		}
-		producer := &producerMock{
-			produceFn: func(productID int64, changes map[string]any) error {
-				events <- changes
-				return nil
-			},
-		}
-		srv := newTestService(products, cache, producer)
+		srv := newTestService(products, cache, &producerMock{})
 
 		err := srv.ReserveStock(context.Background(), "reservation-1", 42, 2)
 
 		require.NoError(t, err)
 		waitSignal(t, invalidated)
-		changes := waitChanges(t, events)
-		require.Equal(t, int64(18), changes["stock"])
-		require.Equal(t, int64(2), changes["reserved_quantity"])
-		require.Equal(t, "reserve", changes["operation"])
 	})
 }
 
@@ -935,9 +926,8 @@ func TestReleaseStock(t *testing.T) {
 		require.Zero(t, producer.calls.Load())
 	})
 
-	t.Run("success invalidates cache and produces event", func(t *testing.T) {
+	t.Run("success invalidates cache", func(t *testing.T) {
 		invalidated := make(chan struct{}, 1)
-		events := make(chan map[string]any, 1)
 		products := &productManagerMock{
 			releaseStockFn: func(
 				_ context.Context,
@@ -955,21 +945,12 @@ func TestReleaseStock(t *testing.T) {
 				return nil
 			},
 		}
-		producer := &producerMock{
-			produceFn: func(productID int64, changes map[string]any) error {
-				events <- changes
-				return nil
-			},
-		}
-		srv := newTestService(products, cache, producer)
+		srv := newTestService(products, cache, &producerMock{})
 
 		err := srv.ReleaseStock(context.Background(), "reservation-1", 42)
 
 		require.NoError(t, err)
 		waitSignal(t, invalidated)
-		changes := waitChanges(t, events)
-		require.Equal(t, int64(22), changes["stock"])
-		require.Equal(t, "release", changes["operation"])
 	})
 }
 

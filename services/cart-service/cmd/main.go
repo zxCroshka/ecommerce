@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/app"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/config"
@@ -33,7 +36,11 @@ func main() {
 	s := <-stop
 	log.Info("stopping application", "signal", s.String())
 
-	application.GRPCSrv.Stop()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := application.GRPCSrv.Stop(shutdownCtx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("failed to stop gRPC server", "error", err)
+	}
 	if err := application.Close(); err != nil {
 		log.Error("failed to close application resources", "error", err)
 	}

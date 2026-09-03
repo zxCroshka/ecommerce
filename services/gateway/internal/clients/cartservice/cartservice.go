@@ -13,7 +13,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
+
+const authorizationMetadataKey = "authorization"
 
 type CartClient struct {
 	api  cartservicev1.CartClient
@@ -71,10 +74,10 @@ func (c *CartClient) Close() error {
 	return nil
 }
 
-func (c *CartClient) GetCart(ctx context.Context, userID int64) (*domain.Cart, error) {
+func (c *CartClient) GetCart(ctx context.Context, accessToken string, userID int64) (*domain.Cart, error) {
 	const op = "grpc.CartClient.GetCart"
 
-	response, err := c.api.GetCart(ctx, &cartservicev1.GetCartRequest{UserId: userID})
+	response, err := c.api.GetCart(withBearerToken(ctx, accessToken), &cartservicev1.GetCartRequest{UserId: userID})
 	if err != nil {
 		return nil, mappingErrors(op, err)
 	}
@@ -86,12 +89,13 @@ func (c *CartClient) GetCart(ctx context.Context, userID int64) (*domain.Cart, e
 
 func (c *CartClient) AddProduct(
 	ctx context.Context,
+	accessToken string,
 	userID, productID, quantity int64,
 ) (*domain.AddProductResult, error) {
 	const op = "grpc.CartClient.AddProduct"
 
 	response, err := c.api.AddProduct(
-		ctx,
+		withBearerToken(ctx, accessToken),
 		&cartservicev1.AddProductRequest{
 			UserId: userID,
 			Product: &cartservicev1.CartItem{
@@ -113,11 +117,11 @@ func (c *CartClient) AddProduct(
 	}, nil
 }
 
-func (c *CartClient) RemoveProduct(ctx context.Context, userID, productID int64) error {
+func (c *CartClient) RemoveProduct(ctx context.Context, accessToken string, userID, productID int64) error {
 	const op = "grpc.CartClient.RemoveProduct"
 
 	response, err := c.api.RemoveProduct(
-		ctx,
+		withBearerToken(ctx, accessToken),
 		&cartservicev1.RemoveProductRequest{
 			UserId:    userID,
 			ProductId: productID,
@@ -135,12 +139,13 @@ func (c *CartClient) RemoveProduct(ctx context.Context, userID, productID int64)
 
 func (c *CartClient) ChangeProductQuantity(
 	ctx context.Context,
+	accessToken string,
 	userID, productID, quantity int64,
 ) error {
 	const op = "grpc.CartClient.ChangeProductQuantity"
 
 	response, err := c.api.ChangeProductQuantity(
-		ctx,
+		withBearerToken(ctx, accessToken),
 		&cartservicev1.ChangeProductQuantityRequest{
 			UserId: userID,
 			Product: &cartservicev1.CartItem{
@@ -159,23 +164,6 @@ func (c *CartClient) ChangeProductQuantity(
 	return nil
 }
 
-func (c *CartClient) CheckoutCart(ctx context.Context, userID int64) (*domain.Cart, error) {
-	const op = "grpc.CartClient.CheckoutCart"
-
-	response, err := c.api.CheckoutCart(
-		ctx,
-		&cartservicev1.CheckoutCartRequest{UserId: userID},
-		grpcretry.Disable(),
-	)
-	if err != nil {
-		return nil, mappingErrors(op, err)
-	}
-	if err := ValidateCheckoutCartResponse(response); err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
-	return cartFromItems(response.GetItems()), nil
-}
-
 func cartFromItems(items []*cartservicev1.CartItem) *domain.Cart {
 	result := make([]domain.CartItem, 0, len(items))
 	for _, item := range items {
@@ -189,4 +177,12 @@ func cartFromItems(items []*cartservicev1.CartItem) *domain.Cart {
 
 func mappingErrors(op string, err error) error {
 	return grpcerrors.Map(op, err)
+}
+
+func withBearerToken(ctx context.Context, token string) context.Context {
+	return metadata.AppendToOutgoingContext(
+		ctx,
+		authorizationMetadataKey,
+		"Bearer "+strings.TrimSpace(token),
+	)
 }

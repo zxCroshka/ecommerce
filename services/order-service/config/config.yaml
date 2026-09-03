@@ -1,0 +1,67 @@
+service:
+  name: "ecommerce-service-order"
+  environment: "local"
+
+grpc:
+  host: "0.0.0.0"
+  port: 9094
+
+postgres:
+  host: "127.0.0.1"
+  port: 5432
+  user: "postgres"
+  password: "postgres"
+  database: "ecommerce"
+  sslmode: "disable"
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  topic:
+    order_created: "order.created"
+
+outbox:
+  poll_interval: "500ms"
+  publish_timeout: "5s"
+  store_timeout: "2s"
+  lock_timeout: "30s"
+  retry_base_delay: "1s"
+  retry_max_delay: "1m"
+  batch_size: 50
+
+user_service:
+  address: "127.0.0.1:9090"
+  timeout: "2s"
+
+cart_service:
+  address: "127.0.0.1:9093"
+  internal_token: "local-dev-cart-service-token-change-me"
+  timeout: "2s"
+
+product_service:
+  address: "127.0.0.1:9091"
+  internal_token: "local-dev-product-service-token-change-me"
+  timeout: "2s"
+
+order:
+  currency: "USD"
+  max_items: 100
+  max_idempotency_length: 128
+  default_list_limit: 20
+  max_list_limit: 100
+
+workflow:
+  lease_timeout: "30s"
+  finalize_timeout: "3s"
+  compensation_timeout: "15s"
+  cart_cleanup_timeout: "3s"
+
+recovery:
+  poll_interval: "5s"
+  recovery_age: "5s"
+  order_timeout: "30s"
+  batch_size: 20
+
+logging:
+  level: "info"
+  format: "json"

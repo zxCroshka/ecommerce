@@ -4,6 +4,11 @@ service:
 
 grpc:
   port: 9093
+  internal_token: "local-dev-cart-service-token-change-me"
+
+user_service:
+  address: "127.0.0.1:9090"
+  timeout: "2s"
 
 product_service:
   address: "127.0.0.1:9091"

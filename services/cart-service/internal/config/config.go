@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Service        ServiceConfig        `mapstructure:"service"`
 	GRPC           GRPCServerConfig     `mapstructure:"grpc"`
+	UserService    UserServiceConfig    `mapstructure:"user_service"`
 	ProductService ProductServiceConfig `mapstructure:"product_service"`
 	Cart           CartConfig           `mapstructure:"cart"`
 	Redis          RedisConfig          `mapstructure:"redis"`
@@ -24,7 +25,13 @@ type ServiceConfig struct {
 }
 
 type GRPCServerConfig struct {
-	Port int `mapstructure:"port"`
+	Port          int    `mapstructure:"port"`
+	InternalToken string `mapstructure:"internal_token"`
+}
+
+type UserServiceConfig struct {
+	Address string        `mapstructure:"address"`
+	Timeout time.Duration `mapstructure:"timeout"`
 }
 
 type ProductServiceConfig struct {
@@ -61,11 +68,14 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetEnvPrefix("APP")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	_ = v.BindEnv("grpc.internal_token", "APP_GRPC_INTERNAL_TOKEN")
+	_ = v.BindEnv("user_service.address", "APP_USER_SERVICE_ADDRESS")
 
 	v.SetDefault("cart.ttl", "168h")
 	v.SetDefault("cart.max_product_quantity", 99)
 	v.SetDefault("product_service.retry_count", 3)
 	v.SetDefault("product_service.timeout", "2s")
+	v.SetDefault("user_service.timeout", "2s")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
 
@@ -89,6 +99,15 @@ func (c Config) Validate() error {
 	}
 	if c.GRPC.Port <= 0 || c.GRPC.Port > 65535 {
 		return fmt.Errorf("grpc.port must be between 1 and 65535")
+	}
+	if strings.TrimSpace(c.GRPC.InternalToken) == "" {
+		return fmt.Errorf("grpc.internal_token is required")
+	}
+	if strings.TrimSpace(c.UserService.Address) == "" {
+		return fmt.Errorf("user_service.address is required")
+	}
+	if c.UserService.Timeout <= 0 {
+		return fmt.Errorf("user_service.timeout must be positive")
 	}
 	if c.ProductService.Address == "" {
 		return fmt.Errorf("product_service.address is required")

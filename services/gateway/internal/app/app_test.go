@@ -26,6 +26,8 @@ func TestNewBuildsHTTPServer(t *testing.T) {
 	require.NotNil(t, application.userClient)
 	require.NotNil(t, application.productClient)
 	require.NotNil(t, application.cartClient)
+	require.NotNil(t, application.orderClient)
+	require.NotNil(t, application.notificationClient)
 
 	require.NoError(t, application.Shutdown(context.Background()))
 	require.NoError(t, application.Shutdown(context.Background()))
@@ -51,6 +53,7 @@ func validConfig() *config.Config {
 			WriteTimeout:    2 * time.Second,
 			IdleTimeout:     3 * time.Second,
 			ShutdownTimeout: 4 * time.Second,
+			RequestTimeout:  time.Second,
 		},
 		UserService: config.UserServiceConfig{
 			Address: "127.0.0.1:19090", RetryCount: 1, Timeout: time.Second,
@@ -60,6 +63,12 @@ func validConfig() *config.Config {
 		},
 		CartService: config.CartServiceConfig{
 			Address: "127.0.0.1:19093", RetryCount: 1, Timeout: time.Second,
+		},
+		OrderService: config.OrderServiceConfig{
+			Address: "127.0.0.1:19094", RetryCount: 1, Timeout: time.Second,
+		},
+		NotificationService: config.NotificationServiceConfig{
+			Address: "127.0.0.1:19095", RetryCount: 1, Timeout: time.Second,
 		},
 	}
 }

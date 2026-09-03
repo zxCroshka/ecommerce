@@ -1,6 +1,7 @@
 package grpcapp
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -26,13 +27,13 @@ func New(
 	userServiceAddress string,
 	defaultListLimit int,
 	maxListLimit int,
-) *App {
+) (*App, error) {
 	userConn, err := grpc.NewClient(
 		userServiceAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		panic(fmt.Errorf("create UserService gRPC client: %w", err))
+		return nil, fmt.Errorf("create UserService gRPC client: %w", err)
 	}
 
 	userClient := userservicev1.NewUserClient(userConn)
@@ -52,7 +53,7 @@ func New(
 		gRPCServer: gRPCServer,
 		userConn:   userConn,
 		port:       port,
-	}
+	}, nil
 }
 
 func (a *App) MustRun() {
@@ -77,11 +78,22 @@ func (a *App) Run() error {
 
 }
 
-func (a *App) Stop() {
+func (a *App) Stop(ctx context.Context) error {
 	const op = "grpcapp.Stop"
 	a.log.With(slog.String("op", op)).Info("stopping gRPC server ", slog.Int("port", a.port))
-	a.gRPCServer.GracefulStop()
-	if err := a.userConn.Close(); err != nil {
-		a.log.Error("failed to close UserService gRPC connection", slog.String("error", err.Error()))
+	done := make(chan struct{})
+	go func() {
+		a.gRPCServer.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		a.gRPCServer.Stop()
+		<-done
 	}
+	if err := a.userConn.Close(); err != nil {
+		return fmt.Errorf("close UserService gRPC connection: %w", err)
+	}
+	return ctx.Err()
 }

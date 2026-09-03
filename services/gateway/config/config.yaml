@@ -9,6 +9,7 @@ http:
   write_timeout: "10s"
   idle_timeout: "60s"
   shutdown_timeout: "10s"
+  request_timeout: "8s"
 
 logging:
   level: "info"
@@ -27,5 +28,15 @@ product_service:
 
 cart_service:
   address: "cart-service:9093"
+  retry_count: 2
+  timeout: "2s"
+
+order_service:
+  address: "order-service:9094"
+  retry_count: 2
+  timeout: "2s"
+
+notification_service:
+  address: "notification-service:9095"
   retry_count: 2
   timeout: "2s"

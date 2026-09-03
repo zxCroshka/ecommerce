@@ -90,16 +90,21 @@ func (s *Storage) Role(ctx context.Context, userID int64) (domain.Role, error) {
 func (s *Storage) UpdateName(ctx context.Context, userID int64, newName string) error {
 	const op = "storage.postgres.UpdateName"
 	stmt := `UPDATE userservice.users SET name=$1 WHERE id=$2`
-	if _, err := s.db.Exec(ctx, stmt, newName, userID); err != nil {
+	tag, err := s.db.Exec(ctx, stmt, newName, userID)
+	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
 	}
 	return nil
 }
 
 func (s *Storage) UpdateEmail(ctx context.Context, userID int64, newEmail string) error {
-	const op = "storage.postgres.UpdateName"
+	const op = "storage.postgres.UpdateEmail"
 	stmt := `UPDATE userservice.users SET email=$1 WHERE id=$2`
-	if _, err := s.db.Exec(ctx, stmt, newEmail, userID); err != nil {
+	tag, err := s.db.Exec(ctx, stmt, newEmail, userID)
+	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			if pgErr.Code == "23505" {
@@ -108,14 +113,21 @@ func (s *Storage) UpdateEmail(ctx context.Context, userID int64, newEmail string
 		}
 		return fmt.Errorf("%s: %w", op, err)
 	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
+	}
 	return nil
 }
 
 func (s *Storage) UpdatePassword(ctx context.Context, userID int64, newPassHash []byte) error {
-	const op = "storage.postgres.UpdateName"
+	const op = "storage.postgres.UpdatePassword"
 	stmt := `UPDATE userservice.users SET password_hash=$1 WHERE id=$2`
-	if _, err := s.db.Exec(ctx, stmt, newPassHash, userID); err != nil {
+	tag, err := s.db.Exec(ctx, stmt, newPassHash, userID)
+	if err != nil {
 		return fmt.Errorf("%s: %w", op, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%s: %w", op, customerrors.ErrUserNotFound)
 	}
 	return nil
 }

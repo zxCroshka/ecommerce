@@ -4,23 +4,28 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/auth"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/cart"
+	"github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/notification"
+	"github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/order"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/product"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/user"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/middleware"
 )
 
 type Router struct {
-	engine         *gin.Engine
-	authHandler    *auth.AuthHandlers
-	userHandler    *user.UserHandlers
-	productHandler *product.ProductHandlers
-	cartHandler    *cart.CartHandlers
-	authMiddleware *middleware.AuthMiddleware
-	setupOnce      sync.Once
+	engine              *gin.Engine
+	authHandler         *auth.AuthHandlers
+	userHandler         *user.UserHandlers
+	productHandler      *product.ProductHandlers
+	cartHandler         *cart.CartHandlers
+	orderHandler        *order.Handlers
+	notificationHandler *notification.Handlers
+	authMiddleware      *middleware.AuthMiddleware
+	setupOnce           sync.Once
 }
 
 func NewRouter(
@@ -30,21 +35,27 @@ func NewRouter(
 	authMiddleware *middleware.AuthMiddleware,
 	productHandler *product.ProductHandlers,
 	cartHandler *cart.CartHandlers,
+	orderHandler *order.Handlers,
+	notificationHandler *notification.Handlers,
+	requestTimeout time.Duration,
 ) *Router {
 	engine := gin.New()
 	engine.Use(
 		middleware.RequestID(),
+		middleware.RequestTimeout(requestTimeout),
 		middleware.RequestLogging(log),
 		gin.Recovery(),
 	)
 
 	router := &Router{
-		engine:         engine,
-		authHandler:    authHandler,
-		userHandler:    userHandler,
-		productHandler: productHandler,
-		cartHandler:    cartHandler,
-		authMiddleware: authMiddleware,
+		engine:              engine,
+		authHandler:         authHandler,
+		userHandler:         userHandler,
+		productHandler:      productHandler,
+		cartHandler:         cartHandler,
+		orderHandler:        orderHandler,
+		notificationHandler: notificationHandler,
+		authMiddleware:      authMiddleware,
 	}
 	router.SetupRoutes()
 	return router
@@ -65,7 +76,24 @@ func (r *Router) SetupRoutes() {
 		r.setupUserRoutes(api)
 		r.setupProductRoutes(api)
 		r.setupCartRoutes(api)
+		r.setupOrderRoutes(api)
+		r.setupNotificationRoutes(api)
 	})
+}
+
+func (r *Router) setupNotificationRoutes(api *gin.RouterGroup) {
+	notifications := api.Group("/notifications")
+	notifications.Use(r.authMiddleware.AuthRequired())
+	notifications.GET("", r.notificationHandler.ListNotifications)
+	notifications.PATCH("/:id/read", r.notificationHandler.MarkAsRead)
+}
+
+func (r *Router) setupOrderRoutes(api *gin.RouterGroup) {
+	orders := api.Group("/orders")
+	orders.Use(r.authMiddleware.AuthRequired())
+	orders.POST("", r.orderHandler.CreateOrder)
+	orders.GET("", r.orderHandler.ListOrders)
+	orders.GET("/:id", r.orderHandler.GetOrder)
 }
 
 func (r *Router) setupAuthRoutes(api *gin.RouterGroup) {

@@ -102,12 +102,34 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			created_at TIMESTAMP DEFAULT NOW()
 		)
 	`)
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS userservice.outbox_events (
+			event_id UUID PRIMARY KEY,
+			topic TEXT NOT NULL,
+			event_type TEXT NOT NULL,
+			aggregate_type TEXT NOT NULL,
+			aggregate_id TEXT NOT NULL,
+			version INTEGER NOT NULL CHECK (version > 0),
+			payload JSONB NOT NULL,
+			occurred_at TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			published_at TIMESTAMPTZ,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT,
+			locked_by UUID,
+			locked_at TIMESTAMPTZ,
+			next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`)
 	return err
 }
 
 // TruncateTables - очищает таблицы между тестами
 func (tdb *TestDB) TruncateTables(ctx context.Context) error {
-	_, err := tdb.Pool.Exec(ctx, `TRUNCATE TABLE userservice.users RESTART IDENTITY CASCADE`)
+	_, err := tdb.Pool.Exec(ctx, `TRUNCATE TABLE userservice.users, userservice.outbox_events RESTART IDENTITY CASCADE`)
 	return err
 }
 

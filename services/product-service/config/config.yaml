@@ -33,6 +33,15 @@ kafka:
   topic:
     product_updated: "product.updated"
 
+outbox:
+  poll_interval: "500ms"
+  publish_timeout: "5s"
+  store_timeout: "2s"
+  lock_timeout: "30s"
+  retry_base_delay: "1s"
+  retry_max_delay: "1m"
+  batch_size: 50
+
 
 pagination:
   default_limit: 20

@@ -14,6 +14,7 @@ var (
 	ErrQuantityExceedsStock = errors.New("quantity exceeds available stock")
 	ErrQuantityExceedsLimit = errors.New("quantity exceeds cart limit")
 	ErrCartEmpty            = errors.New("cart is empty")
+	ErrCartChanged          = errors.New("cart changed after snapshot")
 
 	// Dependency and persistence errors.
 	ErrProductServiceUnavailable = errors.New("product service unavailable")
@@ -26,5 +27,6 @@ var (
 	ErrInvalidCartData           = errors.New("invalid cart data")
 	ErrClearCart                 = errors.New("failed to clear cart")
 	ErrCheckoutCart              = errors.New("failed to checkout cart")
+	ErrConditionalClear          = errors.New("failed to conditionally clear cart")
 	ErrCloseRedis                = errors.New("failed to close redis client")
 )

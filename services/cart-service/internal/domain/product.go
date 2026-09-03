@@ -12,6 +12,11 @@ type Cart struct {
 	Items map[ProductID]Quantity
 }
 
+type CartSnapshot struct {
+	Items    map[ProductID]Quantity
+	Revision int64
+}
+
 func NewCart(items map[string]string) (*Cart, error) {
 	tmp := make(map[ProductID]Quantity)
 	for k, v := range items {

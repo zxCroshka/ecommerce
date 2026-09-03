@@ -14,32 +14,18 @@ import (
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/service/pwdgen"
 )
 
-type UserServiceInterface interface {
-	Register(ctx context.Context, email, password, name string) error
-	Login(ctx context.Context, email, password string) (*jwt.TokenPair, error)
-	RefreshTokens(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
-	Logout(ctx context.Context, identity domain.Identity, refreshToken string) error
-	UpdateEmail(ctx context.Context, userID int64, newEmail string) error
-	UpdateName(ctx context.Context, userID int64, newName string) error
-	UpdatePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error
-	GetUser(ctx context.Context, userID int64) (domain.User, error)
-	ValidateToken(ctx context.Context, token string) (domain.Identity, error)
-}
-
 type UserService struct {
 	log        *slog.Logger
 	usrManager UserManager
 	tknManager TokenManager
-	producer   Producer
 	jwtManager JWTManager
 }
 
-func NewUserService(log *slog.Logger, usrManager UserManager, tknManager TokenManager, producer Producer, jwtManager JWTManager) *UserService {
+func NewUserService(log *slog.Logger, usrManager UserManager, tknManager TokenManager, jwtManager JWTManager) *UserService {
 	return &UserService{
 		log:        log,
 		usrManager: usrManager,
 		tknManager: tknManager,
-		producer:   producer,
 		jwtManager: jwtManager,
 	}
 }
@@ -69,11 +55,6 @@ type TokenManager interface {
 	RotateRefreshToken(ctx context.Context, userID int64, oldTokenID string, newTokenID string, ttl time.Duration) (bool, error)
 }
 
-type Producer interface {
-	Close()
-	Produce(userID int64, email string, name string) error
-}
-
 type JWTManager interface {
 	GenerateTokenPair(userID int64, email string, role domain.Role) (*jwt.TokenPair, string, error)
 	GetRefreshTTL() time.Duration
@@ -97,7 +78,7 @@ func (s *UserService) Register(ctx context.Context, email string, password strin
 		return fmt.Errorf("%s: %w", op, err)
 	}
 	passHash := pwdgen.Generate([]byte(password))
-	userID, err := s.usrManager.RegisterUserTX(ctx, email, passHash, name, domain.RoleCustomer)
+	_, err := s.usrManager.RegisterUserTX(ctx, email, passHash, name, domain.RoleCustomer)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrDuplicateEmail) {
 			log.Warn("user already exists")
@@ -105,12 +86,6 @@ func (s *UserService) Register(ctx context.Context, email string, password strin
 		}
 		return fmt.Errorf("%s: %w", op, err)
 	}
-
-	go func() {
-		if err := s.producer.Produce(userID, email, name); err != nil {
-			s.log.Error("Kafka produce failed", "error", err, "user_id", userID)
-		}
-	}()
 	return nil
 }
 

@@ -5,12 +5,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/domain"
 	authhandlers "github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/auth"
 	carthandlers "github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/cart"
+	notificationhandlers "github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/notification"
+	orderhandlers "github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/order"
 	producthandlers "github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/product"
 	userhandlers "github.com/zxCroshka/ecommerce/services/gateway/internal/handlers/user"
 	"github.com/zxCroshka/ecommerce/services/gateway/internal/middleware"
@@ -48,6 +51,11 @@ func TestRoutes(t *testing.T) {
 		"POST /api/v1/cart/items":               {},
 		"PATCH /api/v1/cart/items/:product_id":  {},
 		"DELETE /api/v1/cart/items/:product_id": {},
+		"POST /api/v1/orders":                   {},
+		"GET /api/v1/orders":                    {},
+		"GET /api/v1/orders/:id":                {},
+		"GET /api/v1/notifications":             {},
+		"PATCH /api/v1/notifications/:id/read":  {},
 	}
 
 	actual := make(map[string]struct{})
@@ -107,6 +115,28 @@ func TestCartRequiresAuthentication(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"code":"UNAUTHENTICATED"`)
 }
 
+func TestOrderRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(&domain.Identity{UserID: 42, Role: "user"})
+	recorder := httptest.NewRecorder()
+
+	router.GetEngine().ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil),
+	)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"code":"UNAUTHENTICATED"`)
+}
+
+func TestNotificationsRequireAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := newTestRouter(&domain.Identity{UserID: 42, Role: "user"})
+	recorder := httptest.NewRecorder()
+	router.GetEngine().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil))
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
 func newTestRouter(identity *domain.Identity) *Router {
 	return NewRouter(
 		nil,
@@ -115,5 +145,8 @@ func newTestRouter(identity *domain.Identity) *Router {
 		middleware.NewAuthMiddleware(nil, &staticTokenValidator{identity: identity}),
 		producthandlers.New(nil, nil),
 		carthandlers.New(nil, nil),
+		orderhandlers.New(nil),
+		notificationhandlers.New(nil),
+		time.Second,
 	)
 }

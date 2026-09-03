@@ -24,6 +24,7 @@ const (
 	Cart_RemoveProduct_FullMethodName         = "/cartservice.Cart/RemoveProduct"
 	Cart_ChangeProductQuantity_FullMethodName = "/cartservice.Cart/ChangeProductQuantity"
 	Cart_CheckoutCart_FullMethodName          = "/cartservice.Cart/CheckoutCart"
+	Cart_ClearCartIfUnchanged_FullMethodName  = "/cartservice.Cart/ClearCartIfUnchanged"
 )
 
 // CartClient is the client API for Cart service.
@@ -34,7 +35,9 @@ type CartClient interface {
 	AddProduct(ctx context.Context, in *AddProductRequest, opts ...grpc.CallOption) (*AddProductResponse, error)
 	RemoveProduct(ctx context.Context, in *RemoveProductRequest, opts ...grpc.CallOption) (*RemoveProductResponse, error)
 	ChangeProductQuantity(ctx context.Context, in *ChangeProductQuantityRequest, opts ...grpc.CallOption) (*ChangeProductQuantityResponse, error)
+	// Internal Order-facing methods. CheckoutCart is a non-destructive snapshot.
 	CheckoutCart(ctx context.Context, in *CheckoutCartRequest, opts ...grpc.CallOption) (*CheckoutCartResponse, error)
+	ClearCartIfUnchanged(ctx context.Context, in *ClearCartIfUnchangedRequest, opts ...grpc.CallOption) (*ClearCartIfUnchangedResponse, error)
 }
 
 type cartClient struct {
@@ -95,6 +98,16 @@ func (c *cartClient) CheckoutCart(ctx context.Context, in *CheckoutCartRequest, 
 	return out, nil
 }
 
+func (c *cartClient) ClearCartIfUnchanged(ctx context.Context, in *ClearCartIfUnchangedRequest, opts ...grpc.CallOption) (*ClearCartIfUnchangedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClearCartIfUnchangedResponse)
+	err := c.cc.Invoke(ctx, Cart_ClearCartIfUnchanged_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CartServer is the server API for Cart service.
 // All implementations must embed UnimplementedCartServer
 // for forward compatibility.
@@ -103,7 +116,9 @@ type CartServer interface {
 	AddProduct(context.Context, *AddProductRequest) (*AddProductResponse, error)
 	RemoveProduct(context.Context, *RemoveProductRequest) (*RemoveProductResponse, error)
 	ChangeProductQuantity(context.Context, *ChangeProductQuantityRequest) (*ChangeProductQuantityResponse, error)
+	// Internal Order-facing methods. CheckoutCart is a non-destructive snapshot.
 	CheckoutCart(context.Context, *CheckoutCartRequest) (*CheckoutCartResponse, error)
+	ClearCartIfUnchanged(context.Context, *ClearCartIfUnchangedRequest) (*ClearCartIfUnchangedResponse, error)
 	mustEmbedUnimplementedCartServer()
 }
 
@@ -128,6 +143,9 @@ func (UnimplementedCartServer) ChangeProductQuantity(context.Context, *ChangePro
 }
 func (UnimplementedCartServer) CheckoutCart(context.Context, *CheckoutCartRequest) (*CheckoutCartResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CheckoutCart not implemented")
+}
+func (UnimplementedCartServer) ClearCartIfUnchanged(context.Context, *ClearCartIfUnchangedRequest) (*ClearCartIfUnchangedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClearCartIfUnchanged not implemented")
 }
 func (UnimplementedCartServer) mustEmbedUnimplementedCartServer() {}
 func (UnimplementedCartServer) testEmbeddedByValue()              {}
@@ -240,6 +258,24 @@ func _Cart_CheckoutCart_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Cart_ClearCartIfUnchanged_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClearCartIfUnchangedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CartServer).ClearCartIfUnchanged(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Cart_ClearCartIfUnchanged_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CartServer).ClearCartIfUnchanged(ctx, req.(*ClearCartIfUnchangedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Cart_ServiceDesc is the grpc.ServiceDesc for Cart service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -266,6 +302,10 @@ var Cart_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CheckoutCart",
 			Handler:    _Cart_CheckoutCart_Handler,
+		},
+		{
+			MethodName: "ClearCartIfUnchanged",
+			Handler:    _Cart_ClearCartIfUnchanged_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

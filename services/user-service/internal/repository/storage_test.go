@@ -1,7 +1,10 @@
+//go:build integration
+
 package repository_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -44,6 +47,18 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		assert.Equal(t, role, user.Role)
 		assert.Equal(t, passHash, user.PassHash)
 		assert.NotZero(t, user.CreatedAt)
+
+		var eventType, aggregateID string
+		var payloadUserID int64
+		err = tdb.Pool.QueryRow(ctx, `
+			SELECT event_type, aggregate_id, (payload->>'user_id')::bigint
+			FROM userservice.outbox_events
+			WHERE aggregate_id=$1
+		`, fmt.Sprint(userID)).Scan(&eventType, &aggregateID, &payloadUserID)
+		require.NoError(t, err)
+		assert.Equal(t, "user.registered", eventType)
+		assert.Equal(t, fmt.Sprint(userID), aggregateID)
+		assert.Equal(t, userID, payloadUserID)
 	})
 
 	t.Run("register with duplicate email fails", func(t *testing.T) {
@@ -120,6 +135,33 @@ func TestStorage_RegisterUserTX(t *testing.T) {
 		_, err := storage.User(ctx, email)
 		require.NoError(t, err)
 	})
+}
+
+func TestStorage_RegisterRollsBackWhenOutboxInsertFails(t *testing.T) {
+	tdb := testhelper.SetupTestPostgres(t)
+	ctx := context.Background()
+	_, err := tdb.Pool.Exec(ctx, `DROP TABLE userservice.outbox_events`)
+	require.NoError(t, err)
+
+	storage, err := repository.NewForTests(ctx, tdb.Pool)
+	require.NoError(t, err)
+	_, err = storage.RegisterUserTX(
+		ctx,
+		"atomic@example.com",
+		[]byte("hash"),
+		"Atomic User",
+		domain.RoleCustomer,
+	)
+	require.Error(t, err)
+
+	var count int
+	err = tdb.Pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM userservice.users WHERE email=$1`,
+		"atomic@example.com",
+	).Scan(&count)
+	require.NoError(t, err)
+	require.Zero(t, count, "business row and outbox row must commit or roll back together")
 }
 
 func TestStorage_CRUDOperations(t *testing.T) {

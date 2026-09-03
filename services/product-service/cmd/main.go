@@ -9,7 +9,6 @@ import (
 
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/app"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/config"
-	kaf "github.com/zxCroshka/ecommerce/services/product-service/internal/kafka"
 )
 
 const (
@@ -19,6 +18,9 @@ const (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
 	cfg, err := config.LoadConfig("./config/config.yaml")
 	if err != nil {
 		slog.Error("Failed to load config", "error", err)
@@ -27,45 +29,19 @@ func main() {
 
 	log := setupLogger(cfg.Service.Environment)
 	log.Info("Starting product-service", "environment", cfg.Service.Environment)
-	kafkaProducer, err := kaf.NewProducer(cfg.Kafka.Brokers)
-	if err != nil {
-		log.Error("Failed to create Kafka producer", "error", err)
-		os.Exit(1)
-	}
-	defer kafkaProducer.Close()
-
-	postgresURL := cfg.Postgres.GetPostgresURL()
 	log.Info(
 		"starting application",
 		slog.String("env", cfg.Service.Environment),
 	)
-	application := app.New(
-		context.Background(),
-		log,
-		cfg.GRPC.Port,
-		cfg.GRPC.InternalToken,
-		cfg.UserService.Address,
-		cfg.Pagination.DefaultLimit,
-		cfg.Pagination.MaxLimit,
-		kafkaProducer,
-		postgresURL,
-		cfg.Redis.Host,
-		cfg.Redis.Port,
-		cfg.Redis.Password,
-		cfg.Redis.DB,
-		cfg.Redis.TTL.ProductCache,
-		cfg.Redis.TTL.ProductsListCache,
-	)
-	go application.GRPCSrv.MustRun()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-	s := <-stop
-
-	log.Info("stopping application", slog.String("signal", s.String()))
-
-	application.GRPCSrv.Stop()
-	log.Info("gRPC server stopped")
+	application, err := app.New(ctx, log, cfg)
+	if err != nil {
+		log.Error("failed to initialize application", "error", err)
+		os.Exit(1)
+	}
+	if err := application.Start(ctx); err != nil {
+		log.Error("application stopped with an error", "error", err)
+		os.Exit(1)
+	}
 
 	log.Info("application stopped")
 }

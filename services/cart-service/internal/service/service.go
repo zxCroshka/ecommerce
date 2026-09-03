@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/zxCroshka/ecommerce/services/cart-service/internal/auth"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/customerrors"
 	"github.com/zxCroshka/ecommerce/services/cart-service/internal/domain"
 	productservicev1 "github.com/zxCroshka/ecommerce/shared/productservice/gen/go"
@@ -29,7 +30,8 @@ type CartManager interface {
 	DeleteCartProduct(ctx context.Context, userID, productID int64, ttl time.Duration) (int64, error)
 	GetCartProducts(ctx context.Context, userID int64) (*domain.Cart, error)
 	ChangeProductQuantity(ctx context.Context, userID, productID, quantity int64, ttl time.Duration) error
-	GetCartForCheckout(ctx context.Context, userID int64) (*domain.Cart, error)
+	GetCartSnapshot(ctx context.Context, userID int64, ttl time.Duration) (*domain.CartSnapshot, error)
+	ClearCartIfUnchanged(ctx context.Context, userID, revision int64, ttl time.Duration) (bool, error)
 }
 
 func NewCartService(
@@ -50,12 +52,16 @@ func NewCartService(
 
 func (s *CartService) AddProductToCart(
 	ctx context.Context,
-	userID, productID, quantity int64,
+	productID, quantity int64,
 ) (int64, int64, error) {
 	const op = "service.AddProductToCart"
+	userID, err := authenticatedUserID(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s: %w", op, err)
+	}
 	log := s.log.With("op", op, "user_id", userID, "product_id", productID)
 
-	if err := validateAddInput(userID, productID, quantity); err != nil {
+	if err := validateAddInput(productID, quantity); err != nil {
 		log.Warn("invalid add-to-cart request", "error", err)
 		return 0, 0, fmt.Errorf("%s: %w", op, err)
 	}
@@ -88,14 +94,14 @@ func (s *CartService) AddProductToCart(
 	return newQuantity, currentQuantity, nil
 }
 
-func (s *CartService) RemoveProductFromCart(ctx context.Context, userID, productID int64) error {
+func (s *CartService) RemoveProductFromCart(ctx context.Context, productID int64) error {
 	const op = "service.RemoveProductFromCart"
+	userID, err := authenticatedUserID(ctx)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
 	log := s.log.With("op", op, "user_id", userID, "product_id", productID)
 
-	if userID <= 0 {
-		log.Warn("invalid remove-from-cart request", "error", customerrors.ErrInvalidUserID)
-		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidUserID)
-	}
 	if productID <= 0 {
 		log.Warn("invalid remove-from-cart request", "error", customerrors.ErrInvalidProductID)
 		return fmt.Errorf("%s: %w", op, customerrors.ErrInvalidProductID)
@@ -109,14 +115,14 @@ func (s *CartService) RemoveProductFromCart(ctx context.Context, userID, product
 	return nil
 }
 
-func (s *CartService) GetCartProducts(ctx context.Context, userID int64) (*domain.Cart, error) {
+func (s *CartService) GetCartProducts(ctx context.Context) (*domain.Cart, error) {
 	const op = "service.GetCartProducts"
+	userID, err := authenticatedUserID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
 	log := s.log.With("op", op, "user_id", userID)
 
-	if userID <= 0 {
-		log.Warn("invalid get-cart request", "error", customerrors.ErrInvalidUserID)
-		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidUserID)
-	}
 	cart, err := s.cartManager.GetCartProducts(ctx, userID)
 	if err != nil {
 		log.Error("failed to get cart", "error", err)
@@ -132,12 +138,17 @@ func (s *CartService) GetCartProducts(ctx context.Context, userID int64) (*domai
 
 func (s *CartService) ChangeProductQuantity(
 	ctx context.Context,
-	userID, productID, quantity int64,
+	productID, quantity int64,
 ) error {
 	const op = "service.ChangeProductQuantity"
+	userID, err := authenticatedUserID(ctx)
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
 	log := s.log.With("op", op, "user_id", userID, "product_id", productID)
 
-	if err := validateIDs(userID, productID); err != nil {
+	if productID <= 0 {
+		err := customerrors.ErrInvalidProductID
 		log.Warn("invalid change-quantity request", "error", err)
 		return fmt.Errorf("%s: %w", op, err)
 	}
@@ -164,7 +175,7 @@ func (s *CartService) ChangeProductQuantity(
 	return nil
 }
 
-func (s *CartService) GetCartForCheckout(ctx context.Context, userID int64) (*domain.Cart, error) {
+func (s *CartService) GetCartForCheckout(ctx context.Context, userID int64) (*domain.CartSnapshot, error) {
 	const op = "service.GetCartForCheckout"
 	log := s.log.With("op", op, "user_id", userID)
 
@@ -172,7 +183,10 @@ func (s *CartService) GetCartForCheckout(ctx context.Context, userID int64) (*do
 		log.Warn("invalid checkout request", "error", customerrors.ErrInvalidUserID)
 		return nil, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidUserID)
 	}
-	cart, err := s.cartManager.GetCartForCheckout(ctx, userID)
+	if !auth.ServiceIdentityFromContext(ctx) {
+		return nil, fmt.Errorf("%s: internal service identity is required", op)
+	}
+	snapshot, err := s.cartManager.GetCartSnapshot(ctx, userID, s.cartTTL)
 	if err != nil {
 		if errors.Is(err, customerrors.ErrCartEmpty) {
 			log.Warn("checkout requested for empty cart")
@@ -182,8 +196,26 @@ func (s *CartService) GetCartForCheckout(ctx context.Context, userID int64) (*do
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	log.Info("cart returned for checkout and cleared", "items_count", len(cart.Items))
-	return cart, nil
+	log.Info("cart snapshot returned for checkout", "items_count", len(snapshot.Items), "revision", snapshot.Revision)
+	return snapshot, nil
+}
+
+func (s *CartService) ClearCartIfUnchanged(ctx context.Context, userID, revision int64) (bool, error) {
+	const op = "service.ClearCartIfUnchanged"
+	if !auth.ServiceIdentityFromContext(ctx) {
+		return false, fmt.Errorf("%s: internal service identity is required", op)
+	}
+	if userID <= 0 {
+		return false, fmt.Errorf("%s: %w", op, customerrors.ErrInvalidUserID)
+	}
+	if revision <= 0 {
+		return false, fmt.Errorf("%s: revision must be positive", op)
+	}
+	cleared, err := s.cartManager.ClearCartIfUnchanged(ctx, userID, revision, s.cartTTL)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", op, err)
+	}
+	return cleared, nil
 }
 
 func (s *CartService) validateProductForCart(
@@ -222,10 +254,8 @@ func (s *CartService) validateProductForCart(
 	return product, nil
 }
 
-func validateAddInput(userID, productID, quantity int64) error {
+func validateAddInput(productID, quantity int64) error {
 	switch {
-	case userID <= 0:
-		return customerrors.ErrInvalidUserID
 	case productID <= 0:
 		return customerrors.ErrInvalidProductID
 	case quantity < 0:
@@ -235,13 +265,10 @@ func validateAddInput(userID, productID, quantity int64) error {
 	}
 }
 
-func validateIDs(userID, productID int64) error {
-	switch {
-	case userID <= 0:
-		return customerrors.ErrInvalidUserID
-	case productID <= 0:
-		return customerrors.ErrInvalidProductID
-	default:
-		return nil
+func authenticatedUserID(ctx context.Context) (int64, error) {
+	identity, ok := auth.UserIdentityFromContext(ctx)
+	if !ok {
+		return 0, customerrors.ErrInvalidUserID
 	}
+	return identity.UserID, nil
 }

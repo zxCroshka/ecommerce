@@ -12,7 +12,7 @@ func ValidateGetCartResponse(response *cartservicev1.GetCartResponse) error {
 	if response == nil {
 		return invalidResponse(op, "response is nil")
 	}
-	return validateCartItems(op, response.GetItems(), true)
+	return validateCartItems(op, response.GetItems())
 }
 
 func ValidateAddProductResponse(response *cartservicev1.AddProductResponse) error {
@@ -38,19 +38,7 @@ func ValidateChangeProductQuantityResponse(response *cartservicev1.ChangeProduct
 	return validatePresent("grpc.CartClient.ValidateChangeProductQuantityResponse", response != nil)
 }
 
-func ValidateCheckoutCartResponse(response *cartservicev1.CheckoutCartResponse) error {
-	const op = "grpc.CartClient.ValidateCheckoutCartResponse"
-
-	if response == nil {
-		return invalidResponse(op, "response is nil")
-	}
-	return validateCartItems(op, response.GetItems(), false)
-}
-
-func validateCartItems(op string, items []*cartservicev1.CartItem, allowEmpty bool) error {
-	if !allowEmpty && len(items) == 0 {
-		return invalidResponse(op, "items are empty")
-	}
+func validateCartItems(op string, items []*cartservicev1.CartItem) error {
 	seen := make(map[int64]struct{}, len(items))
 	for _, item := range items {
 		if item == nil {

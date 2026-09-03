@@ -93,6 +93,7 @@ func applyProductMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, migrationName := range []string{
 		"000001_init.up.sql",
 		"000002_reservations.up.sql",
+		"000003_outbox.up.sql",
 	} {
 		migrationPath := filepath.Join(migrationsDir, migrationName)
 		migration, err := os.ReadFile(filepath.Clean(migrationPath))
@@ -111,7 +112,7 @@ func truncateProducts(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(
 		context.Background(),
-		`TRUNCATE TABLE productservice.products RESTART IDENTITY CASCADE`,
+		`TRUNCATE TABLE productservice.products, productservice.outbox_events RESTART IDENTITY CASCADE`,
 	)
 	require.NoError(t, err)
 }
@@ -171,6 +172,13 @@ func TestStoragePostgresIntegration(t *testing.T) {
 		require.Equal(t, newPrice, product.Price)
 		require.Empty(t, product.Images)
 
+		var updateEvents int
+		require.NoError(t, testDB.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM productservice.outbox_events
+			WHERE aggregate_id=$1 AND event_type='product.updated'
+		`, fmt.Sprint(productID)).Scan(&updateEvents))
+		require.Equal(t, 1, updateEvents)
+
 		active := true
 		products, total, err := storage.ListProducts(ctx, domain.ProductListRequest{
 			Filter: domain.ProductFilter{IsActive: &active},
@@ -187,6 +195,11 @@ func TestStoragePostgresIntegration(t *testing.T) {
 		product, err = storage.GetProduct(ctx, productID)
 		require.NoError(t, err)
 		require.False(t, product.IsActive)
+		require.NoError(t, testDB.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM productservice.outbox_events
+			WHERE aggregate_id=$1 AND event_type='product.updated'
+		`, fmt.Sprint(productID)).Scan(&updateEvents))
+		require.Equal(t, 2, updateEvents)
 
 		products, total, err = storage.ListProducts(ctx, domain.ProductListRequest{
 			Filter: domain.ProductFilter{IsActive: &active},
@@ -212,6 +225,13 @@ func TestStoragePostgresIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, applied)
 
+		var eventCount int
+		require.NoError(t, testDB.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM productservice.outbox_events
+			WHERE aggregate_id=$1
+		`, fmt.Sprint(productID)).Scan(&eventCount))
+		require.Equal(t, 1, eventCount, "an idempotent reserve retry must not duplicate the durable event")
+
 		product, err := storage.GetProduct(ctx, productID)
 		require.NoError(t, err)
 		require.Equal(t, int64(3), product.Stock, "repeated reserve must not change stock")
@@ -227,6 +247,11 @@ func TestStoragePostgresIntegration(t *testing.T) {
 		_, applied, err = storage.ReleaseStockTX(ctx, "reservation-1", productID)
 		require.NoError(t, err)
 		require.False(t, applied)
+		require.NoError(t, testDB.pool.QueryRow(ctx, `
+			SELECT COUNT(*) FROM productservice.outbox_events
+			WHERE aggregate_id=$1
+		`, fmt.Sprint(productID)).Scan(&eventCount))
+		require.Equal(t, 2, eventCount, "reserve and release each create one durable event")
 
 		product, err = storage.GetProduct(ctx, productID)
 		require.NoError(t, err)
@@ -245,8 +270,9 @@ func TestStoragePostgresIntegration(t *testing.T) {
 		)
 		require.ErrorIs(t, err, customerrors.ErrProductInactive)
 
-		_, _, err = storage.ReleaseStockTX(ctx, "unknown-reservation", productID)
-		require.ErrorIs(t, err, customerrors.ErrReservationNotFound)
+		_, applied, err = storage.ReleaseStockTX(ctx, "unknown-reservation", productID)
+		require.NoError(t, err)
+		require.False(t, applied, "release-before-reserve is an idempotent compensation no-op")
 	})
 
 	t.Run("concurrent reserve never makes stock negative", func(t *testing.T) {
@@ -354,5 +380,21 @@ func TestStoragePostgresIntegration(t *testing.T) {
 		product, err := storage.GetProduct(ctx, productID)
 		require.NoError(t, err)
 		require.Equal(t, int64(9), product.Stock)
+	})
+
+	t.Run("business update rolls back when outbox insert fails", func(t *testing.T) {
+		truncateProducts(t, testDB.pool)
+		ctx := context.Background()
+		productID := saveTestProduct(t, ctx, storage, 10, true)
+
+		_, err := testDB.pool.Exec(ctx, `DROP TABLE productservice.outbox_events`)
+		require.NoError(t, err)
+		changedName := "must roll back"
+		err = storage.UpdateProductFields(ctx, productID, domain.ProductPatch{Name: &changedName})
+		require.Error(t, err)
+
+		product, err := storage.GetProduct(ctx, productID)
+		require.NoError(t, err)
+		require.Equal(t, "Integration product", product.Name)
 	})
 }

@@ -2,66 +2,135 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/app/grpcapp"
-	kaf "github.com/zxCroshka/ecommerce/services/product-service/internal/kafka"
+	"github.com/zxCroshka/ecommerce/services/product-service/internal/config"
+	productkafka "github.com/zxCroshka/ecommerce/services/product-service/internal/kafka"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/postgres"
-	"github.com/zxCroshka/ecommerce/services/product-service/internal/repository/redis"
+	redisrepository "github.com/zxCroshka/ecommerce/services/product-service/internal/repository/redis"
 	"github.com/zxCroshka/ecommerce/services/product-service/internal/service"
+	"github.com/zxCroshka/ecommerce/shared/outbox"
 )
+
+const shutdownTimeout = 10 * time.Second
 
 type App struct {
 	GRPCSrv *grpcapp.App
+
+	storage      *postgres.Storage
+	redisClient  *redisrepository.Client
+	producer     *productkafka.Producer
+	relay        *outbox.Relay
+	shutdownOnce sync.Once
+	shutdownErr  error
 }
 
-func New(
-	ctx context.Context,
-	log *slog.Logger,
-	grpcPort int,
-	grpcInternalToken string,
-	userServiceAddress string,
-	defaultListLimit int,
-	maxListLimit int,
-	producer *kaf.Producer,
-	storageURL string,
-	redisHost string,
-	redisPort int,
-	redisPassword string,
-	redisDB int,
-	productCacheTTL time.Duration,
-	productsListCacheTTL time.Duration,
+func New(ctx context.Context, log *slog.Logger, cfg *config.Config) (*App, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("product service config is required")
+	}
+	if log == nil {
+		log = slog.Default()
+	}
 
-) *App {
-	storage, err := postgres.New(ctx, storageURL)
+	storage, err := postgres.New(
+		ctx,
+		cfg.Postgres.GetPostgresURL(),
+		cfg.Kafka.Topic.ProductUpdated,
+	)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("create product storage: %w", err)
 	}
-	cfg := redis.Config{
-		Host:            redisHost,
-		Port:            redisPort,
-		Password:        redisPassword,
-		DB:              redisDB,
-		ProductTTL:      productCacheTTL,
-		ProductsListTTL: productsListCacheTTL,
-	}
-	redisClient, err := redis.NewClient(cfg)
+
+	redisClient, err := redisrepository.NewClient(redisrepository.Config{
+		Host: cfg.Redis.Host, Port: cfg.Redis.Port, Password: cfg.Redis.Password, DB: cfg.Redis.DB,
+		ProductTTL: cfg.Redis.TTL.ProductCache, ProductsListTTL: cfg.Redis.TTL.ProductsListCache,
+	})
 	if err != nil {
-		panic(err)
+		storage.Close()
+		return nil, fmt.Errorf("create product Redis client: %w", err)
 	}
-	productService := service.New(log, storage, redisClient, producer)
-	grpcApp := grpcapp.New(
+
+	producer, err := productkafka.NewProducer(cfg.Kafka.Brokers)
+	if err != nil {
+		_ = redisClient.Close()
+		storage.Close()
+		return nil, fmt.Errorf("create product Kafka producer: %w", err)
+	}
+
+	relay, err := outbox.NewRelay(log, storage.OutboxStore(), producer, outbox.RelayConfig{
+		PollInterval:   cfg.Outbox.PollInterval,
+		PublishTimeout: cfg.Outbox.PublishTimeout,
+		StoreTimeout:   cfg.Outbox.StoreTimeout,
+		LockTimeout:    cfg.Outbox.LockTimeout,
+		RetryBaseDelay: cfg.Outbox.RetryBaseDelay,
+		RetryMaxDelay:  cfg.Outbox.RetryMaxDelay,
+		BatchSize:      cfg.Outbox.BatchSize,
+	})
+	if err != nil {
+		_ = producer.Close()
+		_ = redisClient.Close()
+		storage.Close()
+		return nil, fmt.Errorf("create product outbox relay: %w", err)
+	}
+
+	productService := service.New(log, storage, redisClient)
+	grpcApp, err := grpcapp.New(
 		log,
 		productService,
-		grpcPort,
-		grpcInternalToken,
-		userServiceAddress,
-		defaultListLimit,
-		maxListLimit,
+		cfg.GRPC.Port,
+		cfg.GRPC.InternalToken,
+		cfg.UserService.Address,
+		cfg.Pagination.DefaultLimit,
+		cfg.Pagination.MaxLimit,
 	)
-	return &App{
-		GRPCSrv: grpcApp,
+	if err != nil {
+		_ = producer.Close()
+		_ = redisClient.Close()
+		storage.Close()
+		return nil, fmt.Errorf("create product gRPC server: %w", err)
 	}
 
+	return &App{
+		GRPCSrv:     grpcApp,
+		storage:     storage,
+		redisClient: redisClient,
+		producer:    producer,
+		relay:       relay,
+	}, nil
+}
+
+func (a *App) Start(ctx context.Context) error {
+	if err := a.relay.Start(ctx); err != nil {
+		return err
+	}
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- a.GRPCSrv.Run() }()
+
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case runErr = <-serverErrors:
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	return errors.Join(runErr, a.Shutdown(shutdownCtx))
+}
+
+func (a *App) Shutdown(ctx context.Context) error {
+	a.shutdownOnce.Do(func() {
+		relayErr := a.relay.Stop(ctx)
+		grpcErr := a.GRPCSrv.Stop(ctx)
+		producerErr := a.producer.Close()
+		redisErr := a.redisClient.Close()
+		a.storage.Close()
+		a.shutdownErr = errors.Join(relayErr, grpcErr, producerErr, redisErr)
+	})
+	return a.shutdownErr
 }

@@ -17,6 +17,7 @@ type Config struct {
 	Logging     LoggingConfig     `mapstructure:"logging"`
 	Pagination  PaginationConfig  `mapstructure:"pagination"`
 	UserService UserServiceConfig `mapstructure:"user_service"`
+	Outbox      OutboxConfig      `mapstructure:"outbox"`
 }
 
 type UserServiceConfig struct {
@@ -94,6 +95,16 @@ type PaginationConfig struct {
 	MaxLimit     int `mapstructure:"max_limit"`
 }
 
+type OutboxConfig struct {
+	PollInterval   time.Duration `mapstructure:"poll_interval"`
+	PublishTimeout time.Duration `mapstructure:"publish_timeout"`
+	StoreTimeout   time.Duration `mapstructure:"store_timeout"`
+	LockTimeout    time.Duration `mapstructure:"lock_timeout"`
+	RetryBaseDelay time.Duration `mapstructure:"retry_base_delay"`
+	RetryMaxDelay  time.Duration `mapstructure:"retry_max_delay"`
+	BatchSize      int           `mapstructure:"batch_size"`
+}
+
 func LoadConfig(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(configPath)
@@ -114,6 +125,13 @@ func LoadConfig(configPath string) (*Config, error) {
 	v.SetDefault("pagination.max_limit", 100)
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
+	v.SetDefault("outbox.poll_interval", "500ms")
+	v.SetDefault("outbox.publish_timeout", "5s")
+	v.SetDefault("outbox.store_timeout", "2s")
+	v.SetDefault("outbox.lock_timeout", "30s")
+	v.SetDefault("outbox.retry_base_delay", "1s")
+	v.SetDefault("outbox.retry_max_delay", "1m")
+	v.SetDefault("outbox.batch_size", 50)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
@@ -178,6 +196,15 @@ func (c *Config) Validate() error {
 	}
 	if c.UserService.Address == "" {
 		return fmt.Errorf("user_service.address is required")
+	}
+	if c.Outbox.PollInterval <= 0 || c.Outbox.PublishTimeout <= 0 ||
+		c.Outbox.StoreTimeout <= 0 || c.Outbox.LockTimeout <= 0 ||
+		c.Outbox.RetryBaseDelay <= 0 || c.Outbox.RetryMaxDelay <= 0 ||
+		c.Outbox.BatchSize <= 0 {
+		return fmt.Errorf("outbox settings must be positive")
+	}
+	if c.Outbox.RetryBaseDelay > c.Outbox.RetryMaxDelay {
+		return fmt.Errorf("outbox.retry_base_delay cannot exceed retry_max_delay")
 	}
 
 	return nil

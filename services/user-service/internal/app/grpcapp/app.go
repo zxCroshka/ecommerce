@@ -1,6 +1,7 @@
 package grpcapp
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -55,9 +56,21 @@ func (a *App) Run() error {
 
 }
 
-func (a *App) Stop() {
+func (a *App) Stop(ctx context.Context) error {
 	const op = "grpcapp.Stop"
 	a.log.With(slog.String("op", op)).Info("stopping gRPC server ", slog.Int("port", a.port))
 
-	a.gRPCServer.GracefulStop()
+	done := make(chan struct{})
+	go func() {
+		a.gRPCServer.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		a.gRPCServer.Stop()
+		<-done
+		return ctx.Err()
+	}
 }

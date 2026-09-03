@@ -10,24 +10,34 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/domain"
+	"github.com/zxCroshka/ecommerce/services/user-service/internal/events"
 	customerrors "github.com/zxCroshka/ecommerce/services/user-service/internal/repository/custom_errors"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/db"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/repository/users"
+	"github.com/zxCroshka/ecommerce/shared/outbox"
 )
 
 type Storage struct {
-	pool  *pgxpool.Pool
-	users *users.Storage
+	pool   *pgxpool.Pool
+	users  *users.Storage
+	outbox *outbox.PostgresStore
+	topic  string
 }
 
 func NewForTests(ctx context.Context, pool *pgxpool.Pool) (*Storage, error) {
+	outboxStore, err := outbox.NewPostgresStore(pool, "userservice")
+	if err != nil {
+		return nil, err
+	}
 	return &Storage{
-		pool:  pool,
-		users: users.New(pool),
+		pool:   pool,
+		users:  users.New(pool),
+		outbox: outboxStore,
+		topic:  events.UserRegisteredType,
 	}, nil
 }
 
-func New(ctx context.Context, storageURL string) (*Storage, error) {
+func New(ctx context.Context, storageURL, userRegisteredTopic string) (*Storage, error) {
 	cfg, err := pgxpool.ParseConfig(storageURL)
 	if err != nil {
 		slog.Error(fmt.Sprintf("error parsing connection config: %v", err))
@@ -45,13 +55,21 @@ func New(ctx context.Context, storageURL string) (*Storage, error) {
 		return nil, err
 	}
 	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
 		slog.Error("Failed to ping database", "error", err)
 		return nil, fmt.Errorf("database ping failed: %w", err)
 	}
+	outboxStore, err := outbox.NewPostgresStore(pool, "userservice")
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
 	slog.Info("Database connection established successfully")
 	return &Storage{
-		pool:  pool,
-		users: users.New(pool),
+		pool:   pool,
+		users:  users.New(pool),
+		outbox: outboxStore,
+		topic:  userRegisteredTopic,
 	}, nil
 }
 
@@ -65,13 +83,17 @@ func (s *Storage) RegisterUserTX(
 	var userID int64
 	err := db.Transaction(ctx, s.pool, func(tx pgx.Tx) error {
 		Users := s.users.WithTX(tx)
-		createdAt := time.Now()
+		createdAt := time.Now().UTC()
 		id, err := Users.SaveUser(ctx, email, passHash, name, role, createdAt)
 		if err != nil {
 			return err
 		}
 		userID = id
-		return nil
+		event, err := events.NewUserRegistered(s.topic, userID, email, name, role, createdAt)
+		if err != nil {
+			return err
+		}
+		return s.outbox.Insert(ctx, tx, event)
 	})
 	if err != nil {
 		if errors.Is(err, customerrors.ErrDuplicateEmail) {
@@ -83,6 +105,16 @@ func (s *Storage) RegisterUserTX(
 	}
 	slog.Info("user registered successfully", "user_id", userID, "email", email)
 	return userID, err
+}
+
+func (s *Storage) OutboxStore() outbox.Store {
+	return s.outbox
+}
+
+func (s *Storage) Close() {
+	if s != nil && s.pool != nil {
+		s.pool.Close()
+	}
 }
 
 func (s *Storage) User(ctx context.Context, email string) (domain.User, error) {

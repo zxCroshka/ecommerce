@@ -9,7 +9,9 @@ service Cart {
 	rpc AddProduct(AddProductRequest) returns (AddProductResponse);
 	rpc RemoveProduct(RemoveProductRequest) returns (RemoveProductResponse);
 	rpc ChangeProductQuantity(ChangeProductQuantityRequest) returns (ChangeProductQuantityResponse);
+	// Internal Order-facing methods. CheckoutCart is a non-destructive snapshot.
 	rpc CheckoutCart(CheckoutCartRequest) returns (CheckoutCartResponse);
+	rpc ClearCartIfUnchanged(ClearCartIfUnchangedRequest) returns (ClearCartIfUnchangedResponse);
 }
 
 message CartItem {
@@ -55,4 +57,14 @@ message CheckoutCartRequest {
 
 message CheckoutCartResponse {
 	repeated CartItem items = 1;
+	int64 revision = 2;
+}
+
+message ClearCartIfUnchangedRequest {
+	int64 user_id = 1;
+	int64 revision = 2;
+}
+
+message ClearCartIfUnchangedResponse {
+	bool cleared = 1;
 }

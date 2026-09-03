@@ -9,7 +9,6 @@ import (
 
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/app"
 	"github.com/zxCroshka/ecommerce/services/user-service/internal/config"
-	kaf "github.com/zxCroshka/ecommerce/services/user-service/internal/kafka"
 )
 
 func main() {
@@ -25,15 +24,6 @@ func main() {
 
 	log := setupLogger(cfg.Logging)
 	log.Info("Starting user-service", "environment", cfg.Service.Environment)
-
-	kafkaProducer, err := kaf.NewProducer(cfg.Kafka.Brokers)
-	if err != nil {
-		log.Error("Failed to create Kafka producer", "error", err)
-		os.Exit(1)
-	}
-	defer kafkaProducer.Close()
-
-	postgresURL := cfg.Postgres.GetPostgresURL()
 
 	log.Info(
 		"starting application",
@@ -67,22 +57,15 @@ func main() {
 		),
 		slog.Bool("pprof_enabled", cfg.Pprof.Enabled),
 	)
-	application := app.New(
-		ctx,
-		log,
-		cfg.GRPC.Port,
-		kafkaProducer,
-		postgresURL,
-		cfg.JWT.AccessTTL,
-		cfg.JWT.RefreshTTL,
-		cfg.Redis.Host,
-		cfg.Redis.Port,
-		cfg.Redis.Password,
-		cfg.Redis.DB,
-		cfg.JWT.Secret,
-		cfg.Pprof.Enabled,
-	)
-	application.Start(ctx)
+	application, err := app.New(ctx, log, cfg)
+	if err != nil {
+		log.Error("failed to initialize application", "error", err)
+		os.Exit(1)
+	}
+	if err := application.Start(ctx); err != nil {
+		log.Error("application stopped with an error", "error", err)
+		os.Exit(1)
+	}
 	log.Info("application stopped")
 }
 

@@ -46,8 +46,21 @@ func New(log *slog.Logger, cfg *config.Config) (*App, error) {
 		cfg.Cart.TTL,
 		cfg.Cart.MaxProductQuantity,
 	)
+	grpcApp, err := grpcapp.New(
+		log,
+		cartService,
+		cfg.GRPC.Port,
+		cfg.GRPC.InternalToken,
+		cfg.UserService.Address,
+		cfg.UserService.Timeout,
+	)
+	if err != nil {
+		_ = productClient.Close()
+		_ = cartManager.Close()
+		return nil, fmt.Errorf("create cart gRPC server: %w", err)
+	}
 	return &App{
-		GRPCSrv:       grpcapp.New(log, cartService, cfg.GRPC.Port),
+		GRPCSrv:       grpcApp,
 		cartManager:   cartManager,
 		productClient: productClient,
 	}, nil

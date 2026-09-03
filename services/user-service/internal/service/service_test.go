@@ -107,19 +107,6 @@ func (m *MockTokenManager) RotateRefreshToken(ctx context.Context, userID int64,
 	return args.Bool(0), args.Error(1)
 }
 
-type MockProducer struct {
-	mock.Mock
-}
-
-func (m *MockProducer) Close() {
-	m.Called()
-}
-
-func (m *MockProducer) Produce(userID int64, email string, name string) error {
-	args := m.Called(userID, email, name)
-	return args.Error(0)
-}
-
 type MockJWTManager struct {
 	mock.Mock
 }
@@ -169,7 +156,7 @@ func TestUserService_Register(t *testing.T) {
 		email       string
 		password    string
 		nameInput   string
-		setupMock   func(*MockUserManager, *MockProducer)
+		setupMock   func(*MockUserManager)
 		expectedErr error
 	}{
 		{
@@ -177,12 +164,9 @@ func TestUserService_Register(t *testing.T) {
 			email:     "test@example.com",
 			password:  "password123",
 			nameInput: "Test User",
-			setupMock: func(um *MockUserManager, p *MockProducer) {
+			setupMock: func(um *MockUserManager) {
 				um.On("RegisterUserTX", mock.Anything, "test@example.com", mock.Anything, "Test User", domain.RoleCustomer).
 					Return(int64(1), nil)
-				// ✅ Используем Maybe() для горутины
-				p.On("Produce", int64(1), "test@example.com", "Test User").
-					Return(nil).Maybe()
 			},
 			expectedErr: nil,
 		},
@@ -191,12 +175,9 @@ func TestUserService_Register(t *testing.T) {
 			email:     "admin@example.com",
 			password:  "password123",
 			nameInput: "Admin User",
-			setupMock: func(um *MockUserManager, p *MockProducer) {
+			setupMock: func(um *MockUserManager) {
 				um.On("RegisterUserTX", mock.Anything, "admin@example.com", mock.Anything, "Admin User", domain.RoleCustomer).
 					Return(int64(2), nil)
-				// ✅ Используем Maybe() для горутины
-				p.On("Produce", int64(2), "admin@example.com", "Admin User").
-					Return(nil).Maybe()
 			},
 			expectedErr: nil,
 		},
@@ -205,7 +186,7 @@ func TestUserService_Register(t *testing.T) {
 			email:     "existing@example.com",
 			password:  "password123",
 			nameInput: "Test User",
-			setupMock: func(um *MockUserManager, p *MockProducer) {
+			setupMock: func(um *MockUserManager) {
 				um.On("RegisterUserTX", mock.Anything, "existing@example.com", mock.Anything, "Test User", domain.RoleCustomer).
 					Return(int64(0), customerrors.ErrDuplicateEmail)
 			},
@@ -217,12 +198,11 @@ func TestUserService_Register(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
-			tt.setupMock(mockUM, mockProd)
+			tt.setupMock(mockUM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			err := svc.Register(context.Background(), tt.email, tt.password, tt.nameInput)
 
 			if tt.expectedErr != nil {
@@ -233,7 +213,6 @@ func TestUserService_Register(t *testing.T) {
 			}
 
 			mockUM.AssertExpectations(t)
-			mockProd.AssertExpectations(t)
 		})
 	}
 }
@@ -303,12 +282,11 @@ func TestUserService_Login(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockUM, mockJWT, mockTM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			_, err := svc.Login(context.Background(), tt.email, tt.password)
 
 			if tt.expectedErr != nil {
@@ -384,12 +362,11 @@ func TestUserService_RefreshTokens(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockJWT, mockTM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			_, err := svc.RefreshTokens(context.Background(), tt.refreshToken)
 
 			if tt.expectedErr != nil {
@@ -452,12 +429,11 @@ func TestUserService_Logout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockJWT, mockTM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			err := svc.Logout(context.Background(), tt.identity, tt.refreshToken)
 
 			if tt.expectedErr != nil {
@@ -487,11 +463,10 @@ func TestUserService_LogoutRejectsTokensFromDifferentUsers(t *testing.T) {
 
 	mockUM := new(MockUserManager)
 	mockTM := new(MockTokenManager)
-	mockProd := new(MockProducer)
 	mockJWT := new(MockJWTManager)
 	mockJWT.On("ValidateRefreshToken", "refresh-token").Return(refreshClaims, nil)
 
-	svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+	svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 	err := svc.Logout(context.Background(), identity, "refresh-token")
 
 	assert.ErrorIs(t, err, customerrors.ErrInvalidToken)
@@ -511,7 +486,6 @@ func TestUserService_RefreshTokensRotationFailure(t *testing.T) {
 
 	mockUM := new(MockUserManager)
 	mockTM := new(MockTokenManager)
-	mockProd := new(MockProducer)
 	mockJWT := new(MockJWTManager)
 	mockJWT.On("ValidateRefreshToken", "refresh-token").Return(claims, nil)
 	mockJWT.On("GenerateTokenPair", int64(1), "test@example.com", domain.RoleCustomer).
@@ -520,7 +494,7 @@ func TestUserService_RefreshTokensRotationFailure(t *testing.T) {
 	mockTM.On("RotateRefreshToken", mock.Anything, int64(1), "old-refresh-id", "new-refresh-id", 168*time.Hour).
 		Return(false, nil)
 
-	svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+	svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 	pair, err := svc.RefreshTokens(context.Background(), "refresh-token")
 
 	assert.Nil(t, pair)
@@ -584,12 +558,11 @@ func TestUserService_ValidateToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockJWT, mockTM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			identity, err := svc.ValidateToken(context.Background(), tt.token)
 
 			if tt.expectedErr != nil {
@@ -645,12 +618,11 @@ func TestUserService_GetUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockUM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			user, err := svc.GetUser(context.Background(), tt.userID)
 
 			if tt.expectedErr != nil {
@@ -719,12 +691,11 @@ func TestUserService_UpdateEmail(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockJWT, mockUM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			err := svc.UpdateEmail(context.Background(), tt.userID, tt.newEmail)
 
 			if tt.expectedErr != nil {
@@ -771,12 +742,11 @@ func TestUserService_UpdateName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockJWT, mockUM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			err := svc.UpdateName(context.Background(), tt.userID, tt.newName)
 
 			if tt.expectedErr != nil {
@@ -872,12 +842,11 @@ func TestUserService_UpdatePassword(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockUM := new(MockUserManager)
 			mockTM := new(MockTokenManager)
-			mockProd := new(MockProducer)
 			mockJWT := new(MockJWTManager)
 
 			tt.setupMock(mockJWT, mockUM, mockTM)
 
-			svc := NewUserService(testLogger(), mockUM, mockTM, mockProd, mockJWT)
+			svc := NewUserService(testLogger(), mockUM, mockTM, mockJWT)
 			err := svc.UpdatePassword(context.Background(), tt.userID, tt.oldPassword, tt.newPassword)
 
 			if tt.expectedErr != nil {

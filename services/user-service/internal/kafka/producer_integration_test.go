@@ -3,6 +3,8 @@
 package kaf
 
 import (
+	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,7 +19,7 @@ func TestProducer_Integration_Produce(t *testing.T) {
 	if err != nil {
 		t.Skip("Kafka not available, skipping integration test")
 	}
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	tests := []struct {
 		nameTest string
@@ -41,7 +43,12 @@ func TestProducer_Integration_Produce(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := producer.Produce(tt.userID, tt.email, tt.name)
+			err := producer.Publish(
+				context.Background(),
+				"user.registered",
+				[]byte(strconv.FormatInt(tt.userID, 10)),
+				[]byte(tt.email+":"+tt.name),
+			)
 			assert.NoError(t, err)
 		})
 	}
@@ -55,6 +62,6 @@ func TestProducer_Integration_Close(t *testing.T) {
 
 	// Close не должен паниковать
 	assert.NotPanics(t, func() {
-		producer.Close()
+		_ = producer.Close()
 	})
 }

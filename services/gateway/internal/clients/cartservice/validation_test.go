@@ -54,13 +54,3 @@ func TestValidateCartMutationResponses(t *testing.T) {
 	require.ErrorIs(t, ValidateRemoveProductResponse(nil), customerrors.ErrInternal)
 	require.ErrorIs(t, ValidateChangeProductQuantityResponse(nil), customerrors.ErrInternal)
 }
-
-func TestValidateCheckoutCartResponse(t *testing.T) {
-	t.Parallel()
-
-	require.NoError(t, ValidateCheckoutCartResponse(&cartservicev1.CheckoutCartResponse{
-		Items: []*cartservicev1.CartItem{{ProductId: 1, Quantity: 2}},
-	}))
-	require.ErrorIs(t, ValidateCheckoutCartResponse(nil), customerrors.ErrInternal)
-	require.ErrorIs(t, ValidateCheckoutCartResponse(&cartservicev1.CheckoutCartResponse{}), customerrors.ErrInternal)
-}

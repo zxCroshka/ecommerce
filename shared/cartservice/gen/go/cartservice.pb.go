@@ -488,6 +488,7 @@ func (x *CheckoutCartRequest) GetUserId() int64 {
 type CheckoutCartResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Items         []*CartItem            `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	Revision      int64                  `protobuf:"varint,2,opt,name=revision,proto3" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -529,6 +530,109 @@ func (x *CheckoutCartResponse) GetItems() []*CartItem {
 	return nil
 }
 
+func (x *CheckoutCartResponse) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+type ClearCartIfUnchangedRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Revision      int64                  `protobuf:"varint,2,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClearCartIfUnchangedRequest) Reset() {
+	*x = ClearCartIfUnchangedRequest{}
+	mi := &file_cartservice_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClearCartIfUnchangedRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClearCartIfUnchangedRequest) ProtoMessage() {}
+
+func (x *ClearCartIfUnchangedRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cartservice_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClearCartIfUnchangedRequest.ProtoReflect.Descriptor instead.
+func (*ClearCartIfUnchangedRequest) Descriptor() ([]byte, []int) {
+	return file_cartservice_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ClearCartIfUnchangedRequest) GetUserId() int64 {
+	if x != nil {
+		return x.UserId
+	}
+	return 0
+}
+
+func (x *ClearCartIfUnchangedRequest) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+type ClearCartIfUnchangedResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cleared       bool                   `protobuf:"varint,1,opt,name=cleared,proto3" json:"cleared,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClearCartIfUnchangedResponse) Reset() {
+	*x = ClearCartIfUnchangedResponse{}
+	mi := &file_cartservice_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClearCartIfUnchangedResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClearCartIfUnchangedResponse) ProtoMessage() {}
+
+func (x *ClearCartIfUnchangedResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cartservice_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClearCartIfUnchangedResponse.ProtoReflect.Descriptor instead.
+func (*ClearCartIfUnchangedResponse) Descriptor() ([]byte, []int) {
+	return file_cartservice_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ClearCartIfUnchangedResponse) GetCleared() bool {
+	if x != nil {
+		return x.Cleared
+	}
+	return false
+}
+
 var File_cartservice_proto protoreflect.FileDescriptor
 
 const file_cartservice_proto_rawDesc = "" +
@@ -558,16 +662,23 @@ const file_cartservice_proto_rawDesc = "" +
 	"\aproduct\x18\x02 \x01(\v2\x15.cartservice.CartItemR\aproduct\"\x1f\n" +
 	"\x1dChangeProductQuantityResponse\".\n" +
 	"\x13CheckoutCartRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\"C\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\"_\n" +
 	"\x14CheckoutCartResponse\x12+\n" +
-	"\x05items\x18\x01 \x03(\v2\x15.cartservice.CartItemR\x05items2\xb8\x03\n" +
+	"\x05items\x18\x01 \x03(\v2\x15.cartservice.CartItemR\x05items\x12\x1a\n" +
+	"\brevision\x18\x02 \x01(\x03R\brevision\"R\n" +
+	"\x1bClearCartIfUnchangedRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x1a\n" +
+	"\brevision\x18\x02 \x01(\x03R\brevision\"8\n" +
+	"\x1cClearCartIfUnchangedResponse\x12\x18\n" +
+	"\acleared\x18\x01 \x01(\bR\acleared2\xa5\x04\n" +
 	"\x04Cart\x12D\n" +
 	"\aGetCart\x12\x1b.cartservice.GetCartRequest\x1a\x1c.cartservice.GetCartResponse\x12M\n" +
 	"\n" +
 	"AddProduct\x12\x1e.cartservice.AddProductRequest\x1a\x1f.cartservice.AddProductResponse\x12V\n" +
 	"\rRemoveProduct\x12!.cartservice.RemoveProductRequest\x1a\".cartservice.RemoveProductResponse\x12n\n" +
 	"\x15ChangeProductQuantity\x12).cartservice.ChangeProductQuantityRequest\x1a*.cartservice.ChangeProductQuantityResponse\x12S\n" +
-	"\fCheckoutCart\x12 .cartservice.CheckoutCartRequest\x1a!.cartservice.CheckoutCartResponseBHZFgithub.com/zxCroshka/ecommerce/shared/cartservice/gen/go;cartservicev1b\x06proto3"
+	"\fCheckoutCart\x12 .cartservice.CheckoutCartRequest\x1a!.cartservice.CheckoutCartResponse\x12k\n" +
+	"\x14ClearCartIfUnchanged\x12(.cartservice.ClearCartIfUnchangedRequest\x1a).cartservice.ClearCartIfUnchangedResponseBHZFgithub.com/zxCroshka/ecommerce/shared/cartservice/gen/go;cartservicev1b\x06proto3"
 
 var (
 	file_cartservice_proto_rawDescOnce sync.Once
@@ -581,7 +692,7 @@ func file_cartservice_proto_rawDescGZIP() []byte {
 	return file_cartservice_proto_rawDescData
 }
 
-var file_cartservice_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_cartservice_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_cartservice_proto_goTypes = []any{
 	(*CartItem)(nil),                      // 0: cartservice.CartItem
 	(*GetCartRequest)(nil),                // 1: cartservice.GetCartRequest
@@ -594,6 +705,8 @@ var file_cartservice_proto_goTypes = []any{
 	(*ChangeProductQuantityResponse)(nil), // 8: cartservice.ChangeProductQuantityResponse
 	(*CheckoutCartRequest)(nil),           // 9: cartservice.CheckoutCartRequest
 	(*CheckoutCartResponse)(nil),          // 10: cartservice.CheckoutCartResponse
+	(*ClearCartIfUnchangedRequest)(nil),   // 11: cartservice.ClearCartIfUnchangedRequest
+	(*ClearCartIfUnchangedResponse)(nil),  // 12: cartservice.ClearCartIfUnchangedResponse
 }
 var file_cartservice_proto_depIdxs = []int32{
 	0,  // 0: cartservice.GetCartResponse.items:type_name -> cartservice.CartItem
@@ -605,13 +718,15 @@ var file_cartservice_proto_depIdxs = []int32{
 	5,  // 6: cartservice.Cart.RemoveProduct:input_type -> cartservice.RemoveProductRequest
 	7,  // 7: cartservice.Cart.ChangeProductQuantity:input_type -> cartservice.ChangeProductQuantityRequest
 	9,  // 8: cartservice.Cart.CheckoutCart:input_type -> cartservice.CheckoutCartRequest
-	2,  // 9: cartservice.Cart.GetCart:output_type -> cartservice.GetCartResponse
-	4,  // 10: cartservice.Cart.AddProduct:output_type -> cartservice.AddProductResponse
-	6,  // 11: cartservice.Cart.RemoveProduct:output_type -> cartservice.RemoveProductResponse
-	8,  // 12: cartservice.Cart.ChangeProductQuantity:output_type -> cartservice.ChangeProductQuantityResponse
-	10, // 13: cartservice.Cart.CheckoutCart:output_type -> cartservice.CheckoutCartResponse
-	9,  // [9:14] is the sub-list for method output_type
-	4,  // [4:9] is the sub-list for method input_type
+	11, // 9: cartservice.Cart.ClearCartIfUnchanged:input_type -> cartservice.ClearCartIfUnchangedRequest
+	2,  // 10: cartservice.Cart.GetCart:output_type -> cartservice.GetCartResponse
+	4,  // 11: cartservice.Cart.AddProduct:output_type -> cartservice.AddProductResponse
+	6,  // 12: cartservice.Cart.RemoveProduct:output_type -> cartservice.RemoveProductResponse
+	8,  // 13: cartservice.Cart.ChangeProductQuantity:output_type -> cartservice.ChangeProductQuantityResponse
+	10, // 14: cartservice.Cart.CheckoutCart:output_type -> cartservice.CheckoutCartResponse
+	12, // 15: cartservice.Cart.ClearCartIfUnchanged:output_type -> cartservice.ClearCartIfUnchangedResponse
+	10, // [10:16] is the sub-list for method output_type
+	4,  // [4:10] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -628,7 +743,7 @@ func file_cartservice_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cartservice_proto_rawDesc), len(file_cartservice_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -15,10 +15,10 @@ import (
 )
 
 type CartService interface {
-	GetCart(ctx context.Context, userID int64) (*domain.Cart, error)
-	AddProduct(ctx context.Context, userID, productID, quantity int64) (*domain.AddProductResult, error)
-	RemoveProduct(ctx context.Context, userID, productID int64) error
-	ChangeProductQuantity(ctx context.Context, userID, productID, quantity int64) error
+	GetCart(ctx context.Context, accessToken string, userID int64) (*domain.Cart, error)
+	AddProduct(ctx context.Context, accessToken string, userID, productID, quantity int64) (*domain.AddProductResult, error)
+	RemoveProduct(ctx context.Context, accessToken string, userID, productID int64) error
+	ChangeProductQuantity(ctx context.Context, accessToken string, userID, productID, quantity int64) error
 }
 
 type CartHandlers struct {
@@ -43,7 +43,7 @@ func (h *CartHandlers) GetCart(ctx *gin.Context) {
 		return
 	}
 
-	cart, err := h.srv.GetCart(ctx.Request.Context(), principal.Identity.UserID)
+	cart, err := h.srv.GetCart(ctx.Request.Context(), principal.AccessToken, principal.Identity.UserID)
 	if err != nil {
 		logging.WriteLog(ctx, log, err)
 		response.WriteError(ctx, err)
@@ -83,6 +83,7 @@ func (h *CartHandlers) AddProduct(ctx *gin.Context) {
 
 	result, err := h.srv.AddProduct(
 		ctx.Request.Context(),
+		principal.AccessToken,
 		principal.Identity.UserID,
 		request.ProductID,
 		*request.Quantity,
@@ -133,6 +134,7 @@ func (h *CartHandlers) ChangeQuantity(ctx *gin.Context) {
 
 	if err := h.srv.ChangeProductQuantity(
 		ctx.Request.Context(),
+		principal.AccessToken,
 		principal.Identity.UserID,
 		productID,
 		*request.Quantity,
@@ -165,6 +167,7 @@ func (h *CartHandlers) RemoveProduct(ctx *gin.Context) {
 
 	if err := h.srv.RemoveProduct(
 		ctx.Request.Context(),
+		principal.AccessToken,
 		principal.Identity.UserID,
 		productID,
 	); err != nil {
